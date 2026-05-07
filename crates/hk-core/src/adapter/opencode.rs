@@ -127,9 +127,12 @@ impl AgentAdapter for OpencodeAdapter {
     }
 
     fn detect(&self) -> bool {
+        // Aligned with the other 7 adapters (claude/codex/gemini/cursor/
+        // antigravity/copilot/windsurf) which all detect by base_dir presence
+        // alone. A `which opencode` hit without a config dir would surface an
+        // agent that has nothing for HarnessKit to manage — a UX false
+        // positive — so we keep this strict.
         self.base_dir().exists()
-            || self.mcp_config_path().is_file()
-            || crate::scanner::run_which("opencode").is_some()
     }
 
     fn skill_dirs(&self) -> Vec<PathBuf> {
@@ -272,17 +275,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn detect_accepts_base_dir_or_config_file() {
+    fn detect_requires_base_dir() {
+        // Empty home → not detected: prevents surfacing OpenCode in the agents
+        // list when the user has only the CLI installed but no config dir,
+        // matching how every other adapter checks detection.
         let tmp = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(tmp.path().join(".config/opencode")).unwrap();
         let adapter = OpencodeAdapter::with_home(tmp.path().to_path_buf());
-        assert!(adapter.detect());
+        assert!(!adapter.detect());
 
-        let tmp = tempfile::tempdir().unwrap();
-        let config_dir = tmp.path().join(".config/opencode");
-        std::fs::create_dir_all(&config_dir).unwrap();
-        std::fs::write(config_dir.join("opencode.json"), "{}").unwrap();
-        let adapter = OpencodeAdapter::with_home(tmp.path().to_path_buf());
+        // base_dir present (with or without contents) → detected.
+        std::fs::create_dir_all(tmp.path().join(".config/opencode")).unwrap();
         assert!(adapter.detect());
     }
 
