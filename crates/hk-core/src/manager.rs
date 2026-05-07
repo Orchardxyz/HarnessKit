@@ -454,14 +454,14 @@ fn toggle_plugin_manifest(
             if scanner::stable_id_for(&plugin_id_name, "plugin", adapter.name()) != ext.id {
                 continue;
             }
-            if let Some(ref path) = plugin.path {
-                if let Some(manifest) = plugin_toggle_target(path) {
-                    let disabled_manifest = disabled_plugin_target(&manifest);
-                    let saved = serde_json::json!({ "manifest_path": disabled_manifest.to_string_lossy() });
-                    store.set_disabled_config(&ext.id, Some(&saved.to_string()))?;
-                    std::fs::rename(&manifest, &disabled_manifest)?;
-                    found = true;
-                }
+            if let Some(ref path) = plugin.path
+                && let Some(manifest) = plugin_toggle_target(path)
+            {
+                let disabled_manifest = disabled_plugin_target(&manifest);
+                let saved = serde_json::json!({ "manifest_path": disabled_manifest.to_string_lossy() });
+                store.set_disabled_config(&ext.id, Some(&saved.to_string()))?;
+                std::fs::rename(&manifest, &disabled_manifest)?;
+                found = true;
             }
             break;
         }

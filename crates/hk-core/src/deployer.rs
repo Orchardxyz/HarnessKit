@@ -254,12 +254,14 @@ fn deploy_mcp_server_toml(config_path: &Path, entry: &McpServerEntry) -> Result<
 
 /// JSON-based MCP deploy for OpenCode (`~/.config/opencode/opencode.json`).
 /// Schema reference: https://opencode.ai/config.json (McpLocalConfig).
-/// Differs from `mcpServers`/`servers` agents in three ways:
+///
+/// Differs from `mcpServers`/`servers` agents in four ways:
 ///   - top-level key is `"mcp"`
 ///   - `command` is a single array merging the binary + its args
 ///   - env block is named `"environment"` (not `"env"`)
 ///   - entry must declare `"type": "local"` (the schema also defines a
 ///     `"remote"` variant that HarnessKit does not deploy)
+///
 /// `additionalProperties: false` upstream means we must not emit any
 /// extra fields (e.g. no separate `args`/`env`).
 fn deploy_mcp_server_opencode(
