@@ -21,6 +21,7 @@ const PROJECT_INSTALL_SUPPORT: Record<string, Set<ExtensionKind>> = {
   gemini: new Set(["skill"]), // MCP/hook adapter completion deferred (v2)
   antigravity: new Set(["skill"]), // MCP/hook adapter completion deferred (v2)
   copilot: new Set(["skill"]), // MCP adapter completion deferred (v2)
+  opencode: new Set(["skill", "mcp"]), // hook unsupported (HookFormat::None)
 };
 
 /** Whether the agent's adapter declares project-level support for this kind.
