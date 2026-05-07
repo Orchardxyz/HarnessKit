@@ -5,7 +5,7 @@
 // Plugin reference: https://cursor.com/docs/plugins
 // Plugins: ~/.cursor/plugins/, manifest at .cursor-plugin/plugin.json
 
-use super::{AgentAdapter, HookEntry, HookFormat, McpServerEntry, PluginEntry};
+use super::{AgentAdapter, HookEntry, HookFormat, McpServerEntry, PluginEntry, ProjectMarker};
 use std::path::{Path, PathBuf};
 
 pub struct CursorAdapter {
@@ -115,6 +115,8 @@ impl AgentAdapter for CursorAdapter {
                             .collect()
                     })
                     .unwrap_or_default(),
+                // Cursor's MCP schema has no agent-native disable concept.
+                enabled: true,
             })
             .collect()
     }
@@ -170,6 +172,13 @@ impl AgentAdapter for CursorAdapter {
             }
         }
         files
+    }
+
+    fn project_markers(&self) -> Vec<ProjectMarker> {
+        vec![
+            ProjectMarker::Dir(".cursor/rules"),
+            ProjectMarker::File(".cursorrules"),
+        ]
     }
 
     fn project_rules_patterns(&self) -> Vec<String> {

@@ -7,7 +7,7 @@
 // Extension (plugin) reference: https://geminicli.com/docs/extensions/
 // Extensions: ~/.gemini/extensions/{name}/, manifest at gemini-extension.json
 
-use super::{AgentAdapter, HookEntry, McpServerEntry, PluginEntry};
+use super::{AgentAdapter, HookEntry, McpServerEntry, PluginEntry, ProjectMarker};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -150,6 +150,10 @@ impl AgentAdapter for GeminiAdapter {
         files
     }
 
+    fn project_markers(&self) -> Vec<ProjectMarker> {
+        vec![ProjectMarker::Dir(".gemini")]
+    }
+
     fn project_rules_patterns(&self) -> Vec<String> {
         vec![
             "GEMINI.md".into(),
@@ -204,6 +208,8 @@ impl AgentAdapter for GeminiAdapter {
                             .collect()
                     })
                     .unwrap_or_default(),
+                // Gemini's MCP schema has no agent-native disable concept.
+                enabled: true,
             })
             .collect()
     }

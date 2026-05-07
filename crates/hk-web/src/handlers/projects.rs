@@ -39,18 +39,10 @@ pub async fn add_project(
         let project_path = super::normalize(&project_path);
         let path = project_path.to_string_lossy().to_string();
 
-        // Validate the path contains project markers for any supported agent
-        let has_agent_config = project_path.join(".claude").is_dir()
-            || project_path.join(".mcp.json").is_file()
-            || project_path.join(".codex").is_dir()
-            || project_path.join(".gemini").is_dir()
-            || project_path.join(".cursor").join("rules").is_dir()
-            || project_path.join(".cursorrules").is_file()
-            || project_path.join(".github").join("copilot-instructions.md").is_file()
-            || project_path.join(".github").join("instructions").is_dir()
-            || project_path.join(".agent").join("rules").is_dir()
-            || project_path.join(".agent").join("skills").is_dir();
-        if !has_agent_config {
+        // Validate the path contains project markers for any supported agent.
+        // Each adapter declares its own markers via project_markers() — see
+        // scanner::is_project_dir.
+        if !scanner::is_project_dir(&project_path) {
             return Err(hk_core::HkError::Validation(
                 "Directory does not contain any recognized agent configuration".into(),
             ));

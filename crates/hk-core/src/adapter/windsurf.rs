@@ -9,7 +9,7 @@
 // Ignore reference:   https://docs.windsurf.com/context-awareness/windsurf-ignore
 // File:               .codeiumignore (project root)
 
-use super::{AgentAdapter, HookEntry, HookFormat, McpServerEntry};
+use super::{AgentAdapter, HookEntry, HookFormat, McpServerEntry, ProjectMarker};
 use std::path::{Path, PathBuf};
 
 pub struct WindsurfAdapter {
@@ -125,6 +125,8 @@ impl AgentAdapter for WindsurfAdapter {
                             .collect()
                     })
                     .unwrap_or_default(),
+                // Windsurf's MCP schema has no agent-native disable concept.
+                enabled: true,
             })
             .collect()
     }
@@ -186,6 +188,13 @@ impl AgentAdapter for WindsurfAdapter {
 
     fn global_settings_files(&self) -> Vec<PathBuf> {
         vec![self.mcp_config_path(), self.hook_config_path()]
+    }
+
+    fn project_markers(&self) -> Vec<ProjectMarker> {
+        vec![
+            ProjectMarker::Dir(".windsurf"),
+            ProjectMarker::File(".windsurfrules"),
+        ]
     }
 
     fn project_rules_patterns(&self) -> Vec<String> {

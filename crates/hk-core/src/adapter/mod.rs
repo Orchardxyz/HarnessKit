@@ -18,6 +18,12 @@ pub struct McpServerEntry {
     pub command: String,
     pub args: Vec<String>,
     pub env: std::collections::HashMap<String, String>,
+    /// Whether the agent itself considers this entry active. Currently only
+    /// OpenCode's schema has a per-entry `"enabled"` boolean; every other
+    /// adapter always sets this to `true` because their formats have no
+    /// agent-native disable concept. HarnessKit's own user-toggled disable
+    /// flow tracks state separately in SQLite — this field is orthogonal.
+    pub enabled: bool,
 }
 
 /// Represents a hook entry parsed from an agent's config
@@ -57,6 +63,19 @@ pub enum HookFormat {
     Windsurf,
     /// Agent does not support hooks
     None,
+}
+
+/// A path marker that, when present in a project root directory, identifies
+/// the directory as belonging to a particular agent. Each adapter declares
+/// its own markers via [`AgentAdapter::project_markers`]; project discovery
+/// (`is_project_dir`, `discover_projects`) considers a directory a project
+/// when *any* adapter's marker matches.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ProjectMarker {
+    /// A relative directory that must exist (e.g. `.claude`, `.opencode`).
+    Dir(&'static str),
+    /// A relative file that must exist (e.g. `.mcp.json`, `opencode.json`).
+    File(&'static str),
 }
 
 /// Format used by an agent for MCP server configuration.
@@ -187,6 +206,15 @@ pub trait AgentAdapter: Send + Sync {
     // These describe where this agent looks for project-scoped extensions.
     // Default empty/None means the agent has no project-level support and the
     // scanner skips it.
+
+    /// Path markers (relative to a project root) that identify a directory as
+    /// belonging to this agent. Used by `is_project_dir` / `discover_projects`
+    /// to decide whether a folder qualifies as a project for *any* agent.
+    /// Default empty means this adapter never claims any directory as its
+    /// project — only override if the agent has a stable on-disk convention.
+    fn project_markers(&self) -> Vec<ProjectMarker> {
+        vec![]
+    }
 
     /// Relative dir patterns within a project that contain skill subdirectories
     /// (e.g. `.claude/skills` for Claude — each subdirectory inside is one skill).

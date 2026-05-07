@@ -7,7 +7,7 @@
 //   https://code.claude.com/docs/en/plugins
 // Plugins: ~/.claude/plugins/, registry at installed_plugins.json, manifest at .claude-plugin/plugin.json
 
-use super::{AgentAdapter, HookEntry, McpServerEntry, PluginEntry};
+use super::{AgentAdapter, HookEntry, McpServerEntry, PluginEntry, ProjectMarker};
 use std::path::{Path, PathBuf};
 
 pub struct ClaudeAdapter {
@@ -112,6 +112,8 @@ impl AgentAdapter for ClaudeAdapter {
                             .collect()
                     })
                     .unwrap_or_default(),
+                // Claude's MCP schema has no agent-native disable concept.
+                enabled: true,
             })
             .collect()
     }
@@ -246,6 +248,13 @@ impl AgentAdapter for ClaudeAdapter {
             }
         }
         files
+    }
+
+    fn project_markers(&self) -> Vec<ProjectMarker> {
+        vec![
+            ProjectMarker::Dir(".claude"),
+            ProjectMarker::File(".mcp.json"),
+        ]
     }
 
     fn project_rules_patterns(&self) -> Vec<String> {

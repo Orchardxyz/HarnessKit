@@ -5,7 +5,7 @@
 // Plugin reference: https://developers.openai.com/codex/plugins
 // Plugins: ~/.codex/plugins/cache/{marketplace}/{plugin}/{version}/, manifest at .codex-plugin/plugin.json
 
-use super::{AgentAdapter, HookEntry, McpFormat, McpServerEntry, PluginEntry};
+use super::{AgentAdapter, HookEntry, McpFormat, McpServerEntry, PluginEntry, ProjectMarker};
 use std::path::{Path, PathBuf};
 
 pub struct CodexAdapter {
@@ -93,6 +93,10 @@ impl AgentAdapter for CodexAdapter {
         files
     }
 
+    fn project_markers(&self) -> Vec<ProjectMarker> {
+        vec![ProjectMarker::Dir(".codex")]
+    }
+
     fn project_rules_patterns(&self) -> Vec<String> {
         vec!["AGENTS.md".into(), "AGENTS.override.md".into()]
     }
@@ -155,6 +159,8 @@ impl AgentAdapter for CodexAdapter {
                                 .collect()
                         })
                         .unwrap_or_default(),
+                    // Codex's TOML schema has no agent-native disable concept.
+                    enabled: true,
                 }
             })
             .collect()

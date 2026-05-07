@@ -18,7 +18,7 @@
 // Format: {"hooks": {"PreToolUse": [{"type": "command", "command": "...", "timeout": 30}]}}
 // Events: SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, PreCompact, SubagentStart, SubagentStop, Stop
 
-use super::{AgentAdapter, HookEntry, HookFormat, McpFormat, McpServerEntry, PluginEntry};
+use super::{AgentAdapter, HookEntry, HookFormat, McpFormat, McpServerEntry, PluginEntry, ProjectMarker};
 use std::path::{Path, PathBuf};
 
 /// Read VS Code agent plugin enablement from state.vscdb.
@@ -175,6 +175,13 @@ impl AgentAdapter for CopilotAdapter {
         files
     }
 
+    fn project_markers(&self) -> Vec<ProjectMarker> {
+        vec![
+            ProjectMarker::File(".github/copilot-instructions.md"),
+            ProjectMarker::Dir(".github/instructions"),
+        ]
+    }
+
     fn project_rules_patterns(&self) -> Vec<String> {
         vec![
             ".github/copilot-instructions.md".into(),
@@ -320,6 +327,8 @@ impl AgentAdapter for CopilotAdapter {
                             .collect()
                     })
                     .unwrap_or_default(),
+                // Copilot's MCP schema has no agent-native disable concept.
+                enabled: true,
             })
             .collect()
     }

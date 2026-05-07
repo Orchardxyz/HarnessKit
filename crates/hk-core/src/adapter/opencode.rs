@@ -1,4 +1,4 @@
-use super::{AgentAdapter, HookEntry, HookFormat, McpFormat, McpServerEntry, PluginEntry};
+use super::{AgentAdapter, HookEntry, HookFormat, McpFormat, McpServerEntry, PluginEntry, ProjectMarker};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -68,15 +68,17 @@ impl OpencodeAdapter {
         if value.get("type").and_then(|v| v.as_str()) != Some("local") {
             return None;
         }
-        // Honor OpenCode's `enabled: false` — when the user explicitly disabled
-        // the server in opencode.json, HarnessKit hides it from its view (same
-        // as the remote-type filter above). Field default is true, so omitted
-        // or `enabled: true` flows through normally.
+        // Honor OpenCode's `enabled` field by surfacing its value through the
+        // McpServerEntry — entries with `enabled: false` are NOT filtered out,
+        // matching how HarnessKit displays user-disabled MCPs from every other
+        // agent (visible with a disabled badge, not hidden). Schema default is
+        // true, so omitted means enabled.
         // Spec: https://opencode.ai/docs/mcp-servers/ ("Enable or disable the
         // MCP server on startup").
-        if value.get("enabled").and_then(|v| v.as_bool()) == Some(false) {
-            return None;
-        }
+        let enabled = value
+            .get("enabled")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
 
         let (command, args) = match value.get("command") {
             Some(serde_json::Value::Array(parts)) => {
@@ -105,6 +107,7 @@ impl OpencodeAdapter {
             command,
             args,
             env,
+            enabled,
         })
     }
 }
@@ -229,6 +232,17 @@ impl AgentAdapter for OpencodeAdapter {
         Self::files_with_ext(&self.base_dir().join("commands"), "md")
     }
 
+    fn project_markers(&self) -> Vec<ProjectMarker> {
+        // `.opencode/` (subdirs for skills/commands/plugins/agents/modes/themes)
+        // is the most reliable marker. opencode.json[c] at project root is the
+        // top-level config (the only project where its presence implies use).
+        vec![
+            ProjectMarker::Dir(".opencode"),
+            ProjectMarker::File("opencode.json"),
+            ProjectMarker::File("opencode.jsonc"),
+        ]
+    }
+
     fn project_rules_patterns(&self) -> Vec<String> {
         // Rules: project-root AGENTS.md (https://opencode.ai/docs/rules/).
         // OpenCode also falls back to CLAUDE.md when AGENTS.md is absent, but
@@ -321,12 +335,14 @@ mod tests {
     }
 
     #[test]
-    fn read_mcp_servers_skips_explicitly_disabled() {
+    fn read_mcp_servers_surfaces_disabled_state() {
         // OpenCode lets users keep a server in opencode.json but switch it off
-        // via `enabled: false`. HarnessKit treats those as if they don't exist
-        // — surfacing them as "active" would mislead the UI and any toggle
-        // operation against them would silently fight the user's config.
-        // Default-true (omitted or `enabled: true`) must still flow through.
+        // via `enabled: false`. HarnessKit surfaces these entries as visible
+        // but flagged disabled — the same UX as user-toggled disabled MCPs
+        // from any other agent. Hiding them entirely (a previous attempt)
+        // confused users who couldn't reconcile what was in their config with
+        // what HarnessKit displayed. Default-true (omitted or explicit) flows
+        // through as enabled.
         let tmp = tempfile::tempdir().unwrap();
         let config_dir = tmp.path().join(".config/opencode");
         std::fs::create_dir_all(&config_dir).unwrap();
@@ -334,7 +350,7 @@ mod tests {
             config_dir.join("opencode.json"),
             r#"{
                 "mcp": {
-                    "active": {
+                    "default-on": {
                         "type": "local",
                         "command": ["bin"]
                     },
@@ -354,16 +370,20 @@ mod tests {
         .unwrap();
 
         let adapter = OpencodeAdapter::with_home(tmp.path().to_path_buf());
-        let names: Vec<_> = adapter
+        let entries: std::collections::HashMap<String, bool> = adapter
             .read_mcp_servers()
             .into_iter()
-            .map(|s| s.name)
+            .map(|s| (s.name, s.enabled))
             .collect();
-        assert!(names.contains(&"active".to_string()));
-        assert!(names.contains(&"explicit-on".to_string()));
-        assert!(
-            !names.contains(&"explicit-off".to_string()),
-            "enabled:false entries must be filtered out"
+
+        // All three entries must be visible (no hiding).
+        assert_eq!(entries.len(), 3, "all entries must surface");
+        assert_eq!(entries.get("default-on"), Some(&true), "missing 'enabled' defaults to true");
+        assert_eq!(entries.get("explicit-on"), Some(&true));
+        assert_eq!(
+            entries.get("explicit-off"),
+            Some(&false),
+            "enabled:false must be reflected, not filtered"
         );
     }
 

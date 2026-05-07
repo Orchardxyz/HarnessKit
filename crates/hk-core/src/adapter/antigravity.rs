@@ -2,7 +2,7 @@
 // Config file: ~/.gemini/antigravity/mcp_config.json
 // Format: JSON, top-level key "mcpServers", sub-keys: command, args, env, serverUrl, headers, etc.
 
-use super::{AgentAdapter, HookEntry, HookFormat, McpServerEntry};
+use super::{AgentAdapter, HookEntry, HookFormat, McpServerEntry, ProjectMarker};
 use std::path::{Path, PathBuf};
 
 pub struct AntigravityAdapter {
@@ -86,6 +86,13 @@ impl AgentAdapter for AntigravityAdapter {
         ]
     }
 
+    fn project_markers(&self) -> Vec<ProjectMarker> {
+        vec![
+            ProjectMarker::Dir(".agent/rules"),
+            ProjectMarker::Dir(".agent/skills"),
+        ]
+    }
+
     fn project_rules_patterns(&self) -> Vec<String> {
         vec![
             ".agents/rules/*.md".into(),
@@ -139,6 +146,8 @@ impl AgentAdapter for AntigravityAdapter {
                             .collect()
                     })
                     .unwrap_or_default(),
+                // Antigravity's MCP schema has no agent-native disable concept.
+                enabled: true,
             })
             .collect()
     }
