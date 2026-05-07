@@ -126,6 +126,23 @@ pub fn ensure_path_injection(entry: &mut crate::adapter::McpServerEntry) {
     }
 }
 
+/// Top-level JSON key under which each JSON-based MCP format stores server
+/// entries. The format → key mapping is the only thing that varies between
+/// JSON-format agents in the remove/restore/read paths, so centralizing it
+/// here keeps that knowledge in one place and forces explicit handling of
+/// every JSON variant via the compiler-checked match.
+///
+/// Toml is excluded — Codex's TOML format takes a separate code path in each
+/// caller and never reaches this function.
+fn json_top_key(format: McpFormat) -> &'static str {
+    match format {
+        McpFormat::McpServers => "mcpServers",
+        McpFormat::Servers => "servers",
+        McpFormat::Opencode => "mcp",
+        McpFormat::Toml => unreachable!("Toml format uses a separate TOML code path"),
+    }
+}
+
 /// Deploy an MCP server config entry into the target agent's config file.
 /// Format varies by agent — see `McpFormat`.
 pub fn deploy_mcp_server(
@@ -137,6 +154,7 @@ pub fn deploy_mcp_server(
         McpFormat::McpServers => deploy_mcp_server_json(config_path, entry, "mcpServers"),
         McpFormat::Servers => deploy_mcp_server_json(config_path, entry, "servers"),
         McpFormat::Toml => deploy_mcp_server_toml(config_path, entry),
+        McpFormat::Opencode => deploy_mcp_server_opencode(config_path, entry),
     }
 }
 
@@ -232,6 +250,54 @@ fn deploy_mcp_server_toml(config_path: &Path, entry: &McpServerEntry) -> Result<
     )?;
 
     Ok(())
+}
+
+/// JSON-based MCP deploy for OpenCode (`~/.config/opencode/opencode.json`).
+/// Schema reference: https://opencode.ai/config.json (McpLocalConfig).
+/// Differs from `mcpServers`/`servers` agents in three ways:
+///   - top-level key is `"mcp"`
+///   - `command` is a single array merging the binary + its args
+///   - env block is named `"environment"` (not `"env"`)
+///   - entry must declare `"type": "local"` (the schema also defines a
+///     `"remote"` variant that HarnessKit does not deploy)
+/// `additionalProperties: false` upstream means we must not emit any
+/// extra fields (e.g. no separate `args`/`env`).
+fn deploy_mcp_server_opencode(
+    config_path: &Path,
+    entry: &McpServerEntry,
+) -> Result<(), HkError> {
+    locked_modify_json(config_path, |config| {
+        let servers = config
+            .as_object_mut()
+            .ok_or_else(|| HkError::ConfigCorrupted("Config is not an object".into()))?
+            .entry("mcp")
+            .or_insert_with(|| serde_json::json!({}));
+
+        let mut command_array = vec![serde_json::Value::String(entry.command.clone())];
+        command_array.extend(entry.args.iter().cloned().map(serde_json::Value::String));
+
+        let mut server_obj = serde_json::Map::new();
+        server_obj.insert("type".into(), serde_json::Value::String("local".into()));
+        server_obj.insert("command".into(), serde_json::Value::Array(command_array));
+        if !entry.env.is_empty() {
+            server_obj.insert(
+                "environment".into(),
+                serde_json::Value::Object(
+                    entry
+                        .env
+                        .iter()
+                        .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+                        .collect(),
+                ),
+            );
+        }
+
+        servers
+            .as_object_mut()
+            .ok_or_else(|| HkError::ConfigCorrupted("mcp is not an object".into()))?
+            .insert(entry.name.clone(), serde_json::Value::Object(server_obj));
+        Ok(())
+    })
 }
 
 /// Deploy a hook config entry into the target agent's config file.
@@ -391,10 +457,7 @@ pub fn remove_mcp_server(
             Ok(())
         }
         _ => locked_modify_json(config_path, |config| {
-            let key = match format {
-                McpFormat::Servers => "servers",
-                _ => "mcpServers",
-            };
+            let key = json_top_key(format);
             if let Some(servers) = config.get_mut(key).and_then(|v| v.as_object_mut()) {
                 servers.remove(server_name);
             }
@@ -550,10 +613,7 @@ pub fn restore_mcp_server(
             deploy_mcp_server_toml(config_path, &mcp_entry)
         }
         _ => {
-            let key = match format {
-                McpFormat::Servers => "servers",
-                _ => "mcpServers",
-            };
+            let key = json_top_key(format);
             locked_modify_json(config_path, |config| {
                 let servers = config
                     .as_object_mut()
@@ -997,10 +1057,7 @@ pub fn read_mcp_server_config(
         }
         _ => {
             let config = read_or_create_json(config_path)?;
-            let key = match format {
-                McpFormat::Servers => "servers",
-                _ => "mcpServers",
-            };
+            let key = json_top_key(format);
             Ok(config.get(key).and_then(|v| v.get(server_name)).cloned())
         }
     }
@@ -1305,6 +1362,171 @@ mod tests {
             "-y"
         );
         assert_eq!(server["env"]["MY_KEY"].as_str().unwrap(), "val");
+    }
+
+    #[test]
+    fn test_deploy_mcp_server_opencode_format() {
+        // OpenCode schema (https://opencode.ai/config.json):
+        //   - top-level key "mcp"
+        //   - entry must declare type: "local"
+        //   - command is a single array merging the binary + its args
+        //   - env block is named "environment"
+        //   - additionalProperties: false → no separate "args"/"env" fields
+        let dir = TempDir::new().unwrap();
+        let config = dir.path().join("opencode.json");
+        let entry = McpServerEntry {
+            name: "github".into(),
+            command: "npx".into(),
+            args: vec!["-y".into(), "@modelcontextprotocol/server-github".into()],
+            env: [("GITHUB_TOKEN".into(), "ghp_test".into())].into(),
+        };
+        deploy_mcp_server(&config, &entry, McpFormat::Opencode).unwrap();
+
+        let content: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+
+        assert!(
+            content.get("mcpServers").is_none(),
+            "must not use the Claude-style mcpServers key"
+        );
+        let server = &content["mcp"]["github"];
+        assert_eq!(server["type"], "local");
+        assert_eq!(server["command"][0], "npx");
+        assert_eq!(server["command"][1], "-y");
+        assert_eq!(server["command"][2], "@modelcontextprotocol/server-github");
+        assert_eq!(server["environment"]["GITHUB_TOKEN"], "ghp_test");
+        // additionalProperties: false is enforced upstream — verify we honor it.
+        assert!(server.get("args").is_none(), "must not emit a separate args field");
+        assert!(server.get("env").is_none(), "must use 'environment', not 'env'");
+    }
+
+    #[test]
+    fn test_deploy_mcp_server_opencode_omits_environment_when_empty() {
+        // Schema marks `environment` optional. Emitting `"environment": {}` is
+        // legal but noisy; we omit the field entirely when the source has no
+        // env vars to keep the on-disk config minimal.
+        let dir = TempDir::new().unwrap();
+        let config = dir.path().join("opencode.json");
+        let entry = McpServerEntry {
+            name: "memory".into(),
+            command: "npx".into(),
+            args: vec!["-y".into(), "@modelcontextprotocol/server-memory".into()],
+            env: Default::default(),
+        };
+        deploy_mcp_server(&config, &entry, McpFormat::Opencode).unwrap();
+
+        let content: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+        let server = &content["mcp"]["memory"];
+        assert_eq!(server["type"], "local");
+        assert!(server["command"].is_array());
+        assert!(
+            server.get("environment").is_none(),
+            "should omit environment field when source has no env vars"
+        );
+    }
+
+    #[test]
+    fn test_deploy_mcp_server_opencode_preserves_existing_keys() {
+        // OpenCode's opencode.json holds many top-level keys (model, agent,
+        // skills, etc.). Deploy must merge into the existing "mcp" object
+        // without clobbering siblings or sibling-format settings.
+        let dir = TempDir::new().unwrap();
+        let config = dir.path().join("opencode.json");
+        std::fs::write(
+            &config,
+            r#"{"model":"claude-sonnet-4-6","mcp":{"existing":{"type":"local","command":["node","s.js"]}}}"#,
+        )
+        .unwrap();
+
+        let entry = McpServerEntry {
+            name: "added".into(),
+            command: "python".into(),
+            args: vec!["server.py".into()],
+            env: Default::default(),
+        };
+        deploy_mcp_server(&config, &entry, McpFormat::Opencode).unwrap();
+
+        let content: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+        assert_eq!(content["model"], "claude-sonnet-4-6"); // sibling preserved
+        assert_eq!(content["mcp"]["existing"]["command"][0], "node"); // sibling entry preserved
+        assert_eq!(content["mcp"]["added"]["command"][0], "python"); // new entry added
+    }
+
+    #[test]
+    fn test_opencode_remove_restore_and_read_uses_mcp_key() {
+        // Exercise the three json_top_key code paths (remove/restore/read) for
+        // McpFormat::Opencode in one round-trip. Regression guard: an earlier
+        // implementation routed Opencode through the wildcard arm and silently
+        // operated on "mcpServers" instead of "mcp".
+        let dir = TempDir::new().unwrap();
+        let config = dir.path().join("opencode.json");
+        std::fs::write(
+            &config,
+            r#"{"mcp":{"github":{"type":"local","command":["npx","server-github"],"environment":{"TOKEN":"abc"}}}}"#,
+        )
+        .unwrap();
+
+        // read
+        let saved =
+            read_mcp_server_config(&config, "github", McpFormat::Opencode).unwrap();
+        assert!(saved.is_some(), "read must find entry under 'mcp', not 'mcpServers'");
+        let saved = saved.unwrap();
+        assert_eq!(saved["environment"]["TOKEN"], "abc");
+
+        // remove
+        remove_mcp_server(&config, "github", McpFormat::Opencode).unwrap();
+        let after_remove =
+            read_mcp_server_config(&config, "github", McpFormat::Opencode).unwrap();
+        assert!(after_remove.is_none(), "remove must delete from 'mcp' key");
+
+        // restore
+        restore_mcp_server(&config, "github", &saved, McpFormat::Opencode).unwrap();
+        let restored =
+            read_mcp_server_config(&config, "github", McpFormat::Opencode).unwrap();
+        assert_eq!(
+            restored.unwrap(),
+            saved,
+            "restored entry must match what was saved (bit-perfect round-trip)"
+        );
+
+        // Confirm the entry actually lives under "mcp" on disk.
+        let content: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+        assert!(content.get("mcp").is_some());
+        assert!(
+            content.get("mcpServers").is_none(),
+            "must not have leaked into mcpServers via fallback"
+        );
+    }
+
+    #[test]
+    fn test_opencode_deploy_then_adapter_read_roundtrip() {
+        // Cross-module integration: bytes deployer writes must be exactly what
+        // the OpencodeAdapter's parser reads back — i.e. a McpServerEntry
+        // survives a full write→read loop with command/args/env intact.
+        use crate::adapter::AgentAdapter;
+        use crate::adapter::opencode::OpencodeAdapter;
+
+        let dir = TempDir::new().unwrap();
+        let config = dir.path().join("opencode.json");
+        let original = McpServerEntry {
+            name: "context7".into(),
+            command: "npx".into(),
+            args: vec!["-y".into(), "@upstash/context7-mcp".into()],
+            env: [("API_KEY".into(), "k1".into())].into(),
+        };
+        deploy_mcp_server(&config, &original, McpFormat::Opencode).unwrap();
+
+        let adapter = OpencodeAdapter::with_home(dir.path().to_path_buf());
+        let entries = adapter.read_mcp_servers_from(&config);
+        assert_eq!(entries.len(), 1);
+        let read_back = &entries[0];
+        assert_eq!(read_back.name, original.name);
+        assert_eq!(read_back.command, original.command);
+        assert_eq!(read_back.args, original.args);
+        assert_eq!(read_back.env, original.env);
     }
 
     #[test]

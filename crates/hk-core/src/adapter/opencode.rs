@@ -1,4 +1,4 @@
-use super::{AgentAdapter, HookEntry, HookFormat, McpServerEntry, PluginEntry};
+use super::{AgentAdapter, HookEntry, HookFormat, McpFormat, McpServerEntry, PluginEntry};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -103,6 +103,10 @@ impl OpencodeAdapter {
 impl AgentAdapter for OpencodeAdapter {
     fn hook_format(&self) -> HookFormat {
         HookFormat::None
+    }
+
+    fn mcp_format(&self) -> McpFormat {
+        McpFormat::Opencode
     }
 
     fn name(&self) -> &str {

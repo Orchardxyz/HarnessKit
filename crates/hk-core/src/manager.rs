@@ -5,6 +5,12 @@ use crate::{adapter, deployer, sanitize, scanner};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// Field names under which an MCP server entry stores its environment-variable
+/// block. Most agents use `"env"`; OpenCode's schema names the same block
+/// `"environment"`. Centralized so secret-handling code (redaction, restore
+/// warnings) stays format-agnostic.
+const MCP_ENV_KEYS: [&str; 2] = ["env", "environment"];
+
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct InstallResult {
     pub name: String,
@@ -202,7 +208,10 @@ fn toggle_mcp(ext: &Extension, enabled: bool, store: &Store, adapters: &[Box<dyn
             // the user needs to manually set the real values in the config.
             // PATH is excluded: it is auto-injected, not a secret, and is
             // self-healed above for antigravity.
-            if let Some(env_obj) = entry.get("env").and_then(|v| v.as_object()) {
+            for env_key in MCP_ENV_KEYS {
+                let Some(env_obj) = entry.get(env_key).and_then(|v| v.as_object()) else {
+                    continue;
+                };
                 let redacted_keys: Vec<&str> = env_obj
                     .iter()
                     .filter(|(k, v)| k.as_str() != "PATH" && v.as_str() == Some("<redacted>"))
@@ -216,6 +225,7 @@ fn toggle_mcp(ext: &Extension, enabled: bool, store: &Store, adapters: &[Box<dyn
                         redacted_keys.join(", ")
                     );
                 }
+                break; // each entry has at most one env block — stop on first hit
             }
             deployer::restore_mcp_server(&config_path, &ext.name, &entry, format)?;
             store.set_disabled_config(&ext.id, None)?;
@@ -235,9 +245,14 @@ fn toggle_mcp(ext: &Extension, enabled: bool, store: &Store, adapters: &[Box<dyn
 }
 
 /// Redact environment variable values in an MCP server config entry.
-/// Replaces all values in the "env" object with "<redacted>" while preserving keys.
-/// This prevents secrets (API keys, tokens, etc.) from being stored in the
-/// harnesskit SQLite database when an MCP server is disabled.
+/// Replaces all values inside the env-block object with "<redacted>" while
+/// preserving keys. This prevents secrets (API keys, tokens, etc.) from being
+/// stored in the harnesskit SQLite database when an MCP server is disabled.
+///
+/// Two block names are handled: most agents use `"env"`, while OpenCode's
+/// schema names the same block `"environment"`. Only one will be present per
+/// entry, so iterating both keeps this helper format-agnostic without needing
+/// to thread `McpFormat` through every caller.
 ///
 /// `PATH` is excluded — HarnessKit auto-injects it for agents whose
 /// `needs_path_injection()` returns true (see install.rs). It is an operational
@@ -245,12 +260,14 @@ fn toggle_mcp(ext: &Extension, enabled: bool, store: &Store, adapters: &[Box<dyn
 /// can find its binary again.
 fn redact_mcp_env(entry: &serde_json::Value) -> serde_json::Value {
     let mut redacted = entry.clone();
-    if let Some(env_obj) = redacted.get_mut("env").and_then(|v| v.as_object_mut()) {
-        for (key, value) in env_obj.iter_mut() {
-            if key == "PATH" {
-                continue;
+    for env_key in MCP_ENV_KEYS {
+        if let Some(env_obj) = redacted.get_mut(env_key).and_then(|v| v.as_object_mut()) {
+            for (key, value) in env_obj.iter_mut() {
+                if key == "PATH" {
+                    continue;
+                }
+                *value = serde_json::Value::String("<redacted>".into());
             }
-            *value = serde_json::Value::String("<redacted>".into());
         }
     }
     redacted
@@ -1784,6 +1801,32 @@ mod tests {
             "PATH must be preserved verbatim, not redacted"
         );
         assert_eq!(redacted["env"]["API_KEY"], "<redacted>");
+    }
+
+    #[test]
+    fn test_redact_mcp_env_handles_opencode_environment_key() {
+        // OpenCode's MCP schema names the env block "environment" (not "env").
+        // Without this support, secrets in OpenCode entries would be stored in
+        // plaintext in the SQLite DB on disable, and the restore-time warning
+        // about manually re-setting redacted values would never fire.
+        let entry = serde_json::json!({
+            "type": "local",
+            "command": ["npx", "-y", "@modelcontextprotocol/server-github"],
+            "environment": {
+                "PATH": "/opt/homebrew/bin:/usr/local/bin",
+                "GITHUB_TOKEN": "ghp_realsecret"
+            }
+        });
+        let redacted = super::redact_mcp_env(&entry);
+        assert_eq!(
+            redacted["environment"]["PATH"],
+            "/opt/homebrew/bin:/usr/local/bin",
+            "PATH must round-trip through redaction even under OpenCode's 'environment' key"
+        );
+        assert_eq!(redacted["environment"]["GITHUB_TOKEN"], "<redacted>");
+        // Schema-defining fields (type, command) untouched.
+        assert_eq!(redacted["type"], "local");
+        assert_eq!(redacted["command"][0], "npx");
     }
 
     #[cfg(unix)]

@@ -68,6 +68,13 @@ pub enum McpFormat {
     Servers,
     /// TOML with [mcp_servers.<name>] sections (Codex)
     Toml,
+    /// JSON with "mcp" top-level key (OpenCode). Each entry is a tagged
+    /// union — local servers use `{type: "local", command: [bin, ...args],
+    /// environment: {...}}`, distinct from the Claude-style `{command, args, env}`
+    /// schema. `additionalProperties: false` in the upstream schema means no
+    /// extra fields may be written.
+    /// See https://opencode.ai/config.json (McpLocalConfig).
+    Opencode,
 }
 
 pub trait AgentAdapter: Send + Sync {
