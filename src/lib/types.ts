@@ -195,6 +195,7 @@ export interface AgentInfo {
 export type ConfigCategory =
   | "rules"
   | "memory"
+  | "subagents"
   | "settings"
   | "workflow"
   | "ignore";
@@ -246,10 +247,23 @@ export interface AgentDetail {
 export const CONFIG_CATEGORY_LABELS: Record<ConfigCategory, string> = {
   rules: "Rules",
   memory: "Memory",
+  subagents: "Subagents",
   settings: "Settings",
   workflow: "Workflows",
   ignore: "Ignore",
 };
+
+/** Canonical visual order for config categories across all UI surfaces.
+ * Single source of truth — the agent detail render order and the
+ * section-anchor rail catalog both derive from this. */
+export const CONFIG_CATEGORY_ORDER: ConfigCategory[] = [
+  "settings",
+  "workflow",
+  "rules",
+  "subagents",
+  "memory",
+  "ignore",
+];
 
 export interface FileEntry {
   name: string;

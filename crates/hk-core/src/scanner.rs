@@ -1830,9 +1830,10 @@ pub fn scan_agent_configs(
     let mut configs = Vec::new();
 
     // --- Global files ---
-    let global_groups: [(ConfigCategory, Vec<std::path::PathBuf>); 4] = [
+    let global_groups: [(ConfigCategory, Vec<std::path::PathBuf>); 5] = [
         (ConfigCategory::Rules, adapter.global_rules_files()),
         (ConfigCategory::Memory, adapter.global_memory_files()),
+        (ConfigCategory::Subagents, adapter.global_subagent_files()),
         (ConfigCategory::Settings, adapter.global_settings_files()),
         (ConfigCategory::Workflow, adapter.global_workflow_files()),
     ];
@@ -1847,9 +1848,13 @@ pub fn scan_agent_configs(
     }
 
     // --- Project files ---
-    let project_groups: [(ConfigCategory, Vec<String>); 5] = [
+    let project_groups: [(ConfigCategory, Vec<String>); 6] = [
         (ConfigCategory::Rules, adapter.project_rules_patterns()),
         (ConfigCategory::Memory, adapter.project_memory_patterns()),
+        (
+            ConfigCategory::Subagents,
+            adapter.project_subagent_patterns(),
+        ),
         (
             ConfigCategory::Settings,
             adapter.project_settings_patterns(),
@@ -2620,6 +2625,103 @@ mod config_tests {
             settings.iter().all(|c| !c.path.contains("workflows")
                 && !c.path.contains("global_workflows")),
             "workflow files must not appear under Settings category"
+        );
+    }
+
+    #[test]
+    fn test_scan_agent_configs_subagents_global_and_project() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+
+        let global_agents = home.join(".claude/agents");
+        fs::create_dir_all(&global_agents).unwrap();
+        fs::write(global_agents.join("reviewer.md"), "# global reviewer").unwrap();
+        // Filtered (wrong extension).
+        fs::write(global_agents.join("scratch.txt"), "ignore").unwrap();
+
+        let project = home.join("myproject");
+        let project_agents = project.join(".claude/agents");
+        fs::create_dir_all(&project_agents).unwrap();
+        fs::write(project_agents.join("planner.md"), "# project planner").unwrap();
+
+        let adapter = ClaudeAdapter::with_home(home.to_path_buf());
+        let projects = vec![(
+            "myproject".to_string(),
+            project.to_string_lossy().to_string(),
+        )];
+        let configs = scan_agent_configs(&adapter, &projects);
+
+        let subagents: Vec<_> = configs
+            .iter()
+            .filter(|c| c.category == ConfigCategory::Subagents)
+            .collect();
+        assert_eq!(subagents.len(), 2, "expected one global + one project subagent");
+
+        let global = subagents
+            .iter()
+            .find(|c| matches!(c.scope, ConfigScope::Global))
+            .expect("global subagent missing");
+        assert_eq!(global.file_name, "reviewer.md");
+
+        let project_entry = subagents
+            .iter()
+            .find(|c| matches!(&c.scope, ConfigScope::Project { .. }))
+            .expect("project subagent missing");
+        assert_eq!(project_entry.file_name, "planner.md");
+
+        // Settings must not contain agent files anymore — guards against the
+        // pre-PR behavior where global agents/*.md leaked into Settings.
+        let settings: Vec<_> = configs
+            .iter()
+            .filter(|c| c.category == ConfigCategory::Settings)
+            .collect();
+        assert!(
+            settings.iter().all(|c| !c.path.contains("/agents/")),
+            "agent definition files must not appear under Settings category"
+        );
+    }
+
+    #[test]
+    fn test_scan_agent_configs_subagents_codex_toml() {
+        use crate::adapter::codex::CodexAdapter;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+
+        let global_agents = home.join(".codex/agents");
+        fs::create_dir_all(&global_agents).unwrap();
+        fs::write(global_agents.join("reviewer.toml"), "name = \"reviewer\"").unwrap();
+
+        let project = home.join("myproject");
+        let project_agents = project.join(".codex/agents");
+        fs::create_dir_all(&project_agents).unwrap();
+        fs::write(project_agents.join("planner.toml"), "name = \"planner\"").unwrap();
+
+        let adapter = CodexAdapter::with_home(home.to_path_buf());
+        let projects = vec![(
+            "myproject".to_string(),
+            project.to_string_lossy().to_string(),
+        )];
+        let configs = scan_agent_configs(&adapter, &projects);
+
+        let subagents: Vec<_> = configs
+            .iter()
+            .filter(|c| c.category == ConfigCategory::Subagents)
+            .collect();
+        assert_eq!(
+            subagents.len(),
+            2,
+            "Codex .toml subagents must be scanned at both global and project scope"
+        );
+        assert!(
+            subagents.iter().any(|c| c.file_name == "reviewer.toml"
+                && matches!(c.scope, ConfigScope::Global)),
+            "reviewer.toml must be scoped Global"
+        );
+        assert!(
+            subagents.iter().any(|c| c.file_name == "planner.toml"
+                && matches!(&c.scope, ConfigScope::Project { .. })),
+            "planner.toml must be scoped Project"
         );
     }
 

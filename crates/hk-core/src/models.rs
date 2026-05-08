@@ -374,6 +374,7 @@ pub struct AgentConfigFile {
 pub enum ConfigCategory {
     Rules,
     Memory,
+    Subagents,
     Settings,
     Workflow,
     Ignore,
@@ -384,6 +385,7 @@ impl ConfigCategory {
         match self {
             Self::Rules => "rules",
             Self::Memory => "memory",
+            Self::Subagents => "subagents",
             Self::Settings => "settings",
             Self::Workflow => "workflow",
             Self::Ignore => "ignore",
@@ -394,9 +396,27 @@ impl ConfigCategory {
         match self {
             Self::Rules => 0,
             Self::Memory => 1,
-            Self::Settings => 2,
-            Self::Workflow => 3,
-            Self::Ignore => 4,
+            Self::Subagents => 2,
+            Self::Settings => 3,
+            Self::Workflow => 4,
+            Self::Ignore => 5,
+        }
+    }
+}
+
+impl std::str::FromStr for ConfigCategory {
+    /// Returns `Err` for unknown strings; callers decide the fallback policy
+    /// (existing custom-config parsers do `.parse().unwrap_or(Settings)`).
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "rules" => Ok(Self::Rules),
+            "memory" => Ok(Self::Memory),
+            "subagents" => Ok(Self::Subagents),
+            "settings" => Ok(Self::Settings),
+            "workflow" => Ok(Self::Workflow),
+            "ignore" => Ok(Self::Ignore),
+            _ => Err(()),
         }
     }
 }
@@ -499,9 +519,41 @@ mod tests {
     fn test_config_category_as_str() {
         assert_eq!(ConfigCategory::Rules.as_str(), "rules");
         assert_eq!(ConfigCategory::Memory.as_str(), "memory");
+        assert_eq!(ConfigCategory::Subagents.as_str(), "subagents");
         assert_eq!(ConfigCategory::Settings.as_str(), "settings");
         assert_eq!(ConfigCategory::Workflow.as_str(), "workflow");
         assert_eq!(ConfigCategory::Ignore.as_str(), "ignore");
+    }
+
+    #[test]
+    fn test_config_category_order() {
+        assert!(ConfigCategory::Rules.order() < ConfigCategory::Memory.order());
+        assert!(ConfigCategory::Memory.order() < ConfigCategory::Subagents.order());
+        assert!(ConfigCategory::Subagents.order() < ConfigCategory::Settings.order());
+        assert!(ConfigCategory::Settings.order() < ConfigCategory::Workflow.order());
+        assert!(ConfigCategory::Workflow.order() < ConfigCategory::Ignore.order());
+    }
+
+    #[test]
+    fn test_config_category_from_str_round_trip() {
+        // Every variant's `as_str()` must parse back to itself — this is the
+        // sole guard that catches a missed arm when adding a new variant.
+        for cat in [
+            ConfigCategory::Rules,
+            ConfigCategory::Memory,
+            ConfigCategory::Subagents,
+            ConfigCategory::Settings,
+            ConfigCategory::Workflow,
+            ConfigCategory::Ignore,
+        ] {
+            assert_eq!(
+                cat.as_str().parse::<ConfigCategory>(),
+                Ok(cat),
+                "{:?} round-trip failed",
+                cat
+            );
+        }
+        assert!("not-a-category".parse::<ConfigCategory>().is_err());
     }
 
     #[test]

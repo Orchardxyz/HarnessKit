@@ -9,7 +9,29 @@ pub mod opencode;
 pub mod windsurf;
 
 use crate::models::ConfigScope;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// Return every file directly inside `dir` whose extension equals `ext`
+/// (case-sensitive, no leading dot). Missing or unreadable directories
+/// yield an empty iterator — adapters use this for "scan a fixed subdir"
+/// listings (subagent / mode / theme / command files etc.) and rely on
+/// the silent-empty behavior so a missing optional dir isn't an error.
+///
+/// Returns an iterator (not a Vec) so callers that want to chain extra
+/// predicates pay only one allocation in `.collect()`. Callers that just
+/// need the full list write `.collect()` once.
+pub(crate) fn files_with_ext<'a>(
+    dir: &'a Path,
+    ext: &'a str,
+) -> impl Iterator<Item = PathBuf> + 'a {
+    std::fs::read_dir(dir)
+        .ok()
+        .into_iter()
+        .flatten() // Option<ReadDir> → entries (or none)
+        .flatten() // Result<DirEntry, _> → DirEntry (skip Err)
+        .map(|entry| entry.path())
+        .filter(move |path| path.extension().is_some_and(|e| e == ext))
+}
 
 /// Represents an MCP server entry parsed from an agent's config
 #[derive(Debug, Clone)]
@@ -170,6 +192,14 @@ pub trait AgentAdapter: Send + Sync {
         vec![]
     }
 
+    /// Global subagent definition files (absolute paths). Each file in the
+    /// returned list is one subagent persona definition (e.g.
+    /// `~/.claude/agents/foo.md`, `~/.codex/agents/bar.toml`). Distinct from
+    /// settings: subagents define behavior/personality, not config knobs.
+    fn global_subagent_files(&self) -> Vec<PathBuf> {
+        vec![]
+    }
+
     /// Relative paths/globs for rules within a project dir (e.g. "CLAUDE.md")
     fn project_rules_patterns(&self) -> Vec<String> {
         vec![]
@@ -182,6 +212,13 @@ pub trait AgentAdapter: Send + Sync {
 
     /// Relative paths/globs for settings within a project dir
     fn project_settings_patterns(&self) -> Vec<String> {
+        vec![]
+    }
+
+    /// Relative paths/globs for subagent definition files within a project dir
+    /// (e.g. `.claude/agents/*.md`, `.codex/agents/*.toml`). Each matched file
+    /// is one subagent persona definition.
+    fn project_subagent_patterns(&self) -> Vec<String> {
         vec![]
     }
 
@@ -344,9 +381,11 @@ mod tests {
             let _ = a.global_rules_files();
             let _ = a.global_memory_files();
             let _ = a.global_settings_files();
+            let _ = a.global_subagent_files();
             let _ = a.project_rules_patterns();
             let _ = a.project_memory_patterns();
             let _ = a.project_settings_patterns();
+            let _ = a.project_subagent_patterns();
             let _ = a.project_ignore_patterns();
             let _ = a.global_workflow_files();
             let _ = a.project_workflow_patterns();
