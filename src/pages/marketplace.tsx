@@ -312,8 +312,8 @@ export default function MarketplacePage() {
     fetchAgents();
   }, [fetchAgents]);
   useEffect(() => {
-    loadTrending();
-  }, [loadTrending]);
+    loadTrending(tab);
+  }, [tab, loadTrending]);
   useEffect(() => {
     if (selectedItem) detailPanelRef.current?.focus({ preventScroll: true });
   }, [selectedItem]);

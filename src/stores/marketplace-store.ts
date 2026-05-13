@@ -37,7 +37,7 @@ interface MarketplaceState {
   setTab: (tab: TabKind) => void;
   setQuery: (query: string) => void;
   search: () => Promise<void>;
-  loadTrending: () => Promise<void>;
+  loadTrending: (tab?: TabKind) => Promise<void>;
   selectItem: (item: MarketplaceItem) => void;
   closePreview: () => void;
   install: (
@@ -182,8 +182,8 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
       query: "",
       selectedItem: null,
       trending: trendingCache[tab],
+      trendingLoading: trendingCache[tab].length === 0,
     });
-    get().loadTrending();
   },
   setQuery(query) {
     set({ query });
@@ -214,8 +214,9 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
       set({ results: [], loading: false });
     }
   },
-  async loadTrending() {
-    const { tab, trendingFetchedAt } = get();
+  async loadTrending(tabOverride) {
+    const tab = tabOverride ?? get().tab;
+    const { trendingFetchedAt } = get();
     if (Date.now() - trendingFetchedAt[tab] < TRENDING_TTL) return;
     // Clear detail caches on refresh so stale data doesn't linger
     set({
