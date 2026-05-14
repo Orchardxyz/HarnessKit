@@ -37,7 +37,7 @@ interface MarketplaceState {
   setTab: (tab: TabKind) => void;
   setQuery: (query: string) => void;
   search: () => Promise<void>;
-  loadTrending: () => Promise<void>;
+  loadTrending: (tab?: TabKind) => Promise<void>;
   selectItem: (item: MarketplaceItem) => void;
   closePreview: () => void;
   install: (
@@ -175,15 +175,19 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
   auditCache: new Map(),
   cliReadmeCache: new Map(),
   setTab(tab) {
-    const { trendingCache } = get();
+    const { trendingCache, tab: prevTab } = get();
     set({
       tab,
       results: [],
       query: "",
       selectedItem: null,
       trending: trendingCache[tab],
+      // Only flag loading when tab actually changes — otherwise the
+      // [tab]-keyed useEffect in marketplace.tsx won't refire and the
+      // spinner would be stuck (e.g. user clicks the active tab after
+      // a failed fetch left trendingCache[tab] empty).
+      trendingLoading: tab !== prevTab && trendingCache[tab].length === 0,
     });
-    get().loadTrending();
   },
   setQuery(query) {
     set({ query });
@@ -214,8 +218,9 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
       set({ results: [], loading: false });
     }
   },
-  async loadTrending() {
-    const { tab, trendingFetchedAt } = get();
+  async loadTrending(tabOverride) {
+    const tab = tabOverride ?? get().tab;
+    const { trendingFetchedAt } = get();
     if (Date.now() - trendingFetchedAt[tab] < TRENDING_TTL) return;
     // Clear detail caches on refresh so stale data doesn't linger
     set({
