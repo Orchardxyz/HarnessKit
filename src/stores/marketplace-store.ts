@@ -175,14 +175,18 @@ export const useMarketplaceStore = create<MarketplaceState>((set, get) => ({
   auditCache: new Map(),
   cliReadmeCache: new Map(),
   setTab(tab) {
-    const { trendingCache } = get();
+    const { trendingCache, tab: prevTab } = get();
     set({
       tab,
       results: [],
       query: "",
       selectedItem: null,
       trending: trendingCache[tab],
-      trendingLoading: trendingCache[tab].length === 0,
+      // Only flag loading when tab actually changes — otherwise the
+      // [tab]-keyed useEffect in marketplace.tsx won't refire and the
+      // spinner would be stuck (e.g. user clicks the active tab after
+      // a failed fetch left trendingCache[tab] empty).
+      trendingLoading: tab !== prevTab && trendingCache[tab].length === 0,
     });
   },
   setQuery(query) {
