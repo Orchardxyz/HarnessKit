@@ -1,9 +1,10 @@
 import i18n from "i18next";
-import LanguageDetector from "i18next-browser-languagedetector";
 import { initReactI18next } from "react-i18next";
 
 export const SUPPORTED_LANGUAGES = ["en", "zh"] as const;
 export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
+export const LANGUAGE_PREFERENCES = ["system", ...SUPPORTED_LANGUAGES] as const;
+export type LanguagePreference = (typeof LANGUAGE_PREFERENCES)[number];
 
 export const LANGUAGE_STORAGE_KEY = "hk-language";
 
@@ -27,26 +28,74 @@ for (const [path, content] of Object.entries(localeModules)) {
 // Derive namespace list from the English locale (source of truth)
 const NAMESPACES = Object.keys(resources.en ?? {});
 
-i18n
-  .use(LanguageDetector)
-  .use(initReactI18next)
-  .init({
-    resources,
-    fallbackLng: "en",
-    supportedLngs: SUPPORTED_LANGUAGES,
-    defaultNS: "common",
-    ns: NAMESPACES,
-    interpolation: {
-      escapeValue: false,
-    },
-    detection: {
-      // localStorage only — do NOT auto-detect from navigator.language.
-      // The product default is English; users opt into other languages
-      // via Settings, which persists their choice in localStorage.
-      order: ["localStorage"],
-      lookupLocalStorage: LANGUAGE_STORAGE_KEY,
-      caches: ["localStorage"],
-    },
-  });
+function isLanguagePreference(
+  value: string | null | undefined,
+): value is LanguagePreference {
+  return (LANGUAGE_PREFERENCES as readonly string[]).includes(value ?? "");
+}
+
+export function mapLocaleToSupportedLanguage(
+  locale: string | null | undefined,
+): SupportedLanguage | null {
+  if (!locale) return null;
+
+  const normalized = locale.toLowerCase();
+  if (normalized === "zh" || normalized.startsWith("zh-")) return "zh";
+  if (normalized === "en" || normalized.startsWith("en-")) return "en";
+  return null;
+}
+
+export function detectSystemLanguage(): SupportedLanguage {
+  if (typeof navigator === "undefined") return "en";
+
+  const candidates = navigator.languages?.length
+    ? navigator.languages
+    : [navigator.language];
+
+  for (const candidate of candidates) {
+    const mapped = mapLocaleToSupportedLanguage(candidate);
+    if (mapped) return mapped;
+  }
+
+  return "en";
+}
+
+export function getStoredLanguagePreference(): LanguagePreference {
+  if (typeof localStorage === "undefined") return "system";
+
+  const value = localStorage.getItem(LANGUAGE_STORAGE_KEY);
+  return isLanguagePreference(value) ? value : "system";
+}
+
+export function resolveLanguagePreference(
+  preference: LanguagePreference,
+): SupportedLanguage {
+  return preference === "system" ? detectSystemLanguage() : preference;
+}
+
+export async function applyLanguagePreference(
+  preference: LanguagePreference,
+): Promise<void> {
+  if (typeof localStorage !== "undefined") {
+    localStorage.setItem(LANGUAGE_STORAGE_KEY, preference);
+  }
+
+  await i18n.changeLanguage(resolveLanguagePreference(preference));
+}
+
+const initialPreference = getStoredLanguagePreference();
+const initialLanguage = resolveLanguagePreference(initialPreference);
+
+i18n.use(initReactI18next).init({
+  resources,
+  lng: initialLanguage,
+  fallbackLng: "en",
+  supportedLngs: SUPPORTED_LANGUAGES,
+  defaultNS: "common",
+  ns: NAMESPACES,
+  interpolation: {
+    escapeValue: false,
+  },
+});
 
 export default i18n;

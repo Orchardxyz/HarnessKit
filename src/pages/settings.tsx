@@ -16,7 +16,11 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { openDirectoryPicker } from "@/lib/dialog";
-import { SUPPORTED_LANGUAGES, type SupportedLanguage } from "@/lib/i18n";
+import {
+  applyLanguagePreference,
+  getStoredLanguagePreference,
+  type LanguagePreference,
+} from "@/lib/i18n";
 import { api } from "@/lib/invoke";
 import { isDesktop } from "@/lib/transport";
 import { agentDisplayName, type DiscoveredProject } from "@/lib/types";
@@ -59,9 +63,10 @@ const ICON_OPTIONS: { value: AppIcon; label: string; src: string }[] = [
 ];
 
 const LANGUAGE_OPTIONS: {
-  value: SupportedLanguage;
-  labelKey: "language.en" | "language.zh";
+  value: LanguagePreference;
+  labelKey: "language.system" | "language.en" | "language.zh";
 }[] = [
+  { value: "system", labelKey: "language.system" },
   { value: "en", labelKey: "language.en" },
   { value: "zh", labelKey: "language.zh" },
 ];
@@ -160,13 +165,9 @@ function WebUpdateSection() {
 }
 
 export default function SettingsPage() {
-  const { t, i18n } = useTranslation("settings");
+  const { t } = useTranslation("settings");
   const { t: tc } = useTranslation("common");
-  const language = (SUPPORTED_LANGUAGES as readonly string[]).includes(
-    i18n.resolvedLanguage ?? "",
-  )
-    ? (i18n.resolvedLanguage as SupportedLanguage)
-    : "en";
+  const languagePreference = getStoredLanguagePreference();
   const {
     themeName,
     mode,
@@ -784,14 +785,14 @@ export default function SettingsPage() {
                   <button
                     key={opt.value}
                     onClick={() => {
-                      void i18n.changeLanguage(opt.value);
+                      void applyLanguagePreference(opt.value);
                     }}
-                    aria-pressed={language === opt.value}
+                    aria-pressed={languagePreference === opt.value}
                     className={clsx(
                       "px-3 py-1 text-xs font-medium transition-colors duration-200",
                       i === 0 && "rounded-l-lg",
                       i === LANGUAGE_OPTIONS.length - 1 && "rounded-r-lg",
-                      language === opt.value
+                      languagePreference === opt.value
                         ? "bg-primary text-primary-foreground shadow-sm"
                         : "text-muted-foreground hover:bg-accent",
                     )}
