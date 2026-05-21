@@ -2,7 +2,8 @@
   "title": "Settings",
   "language": {
     "label": "Language",
-    "description": "Choose your preferred display language.",
+    "description": "Choose your preferred display language, or follow the system setting.",
+    "system": "Follow System",
     "en": "English",
     "zh": "中文"
   },
