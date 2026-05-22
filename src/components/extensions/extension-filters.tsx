@@ -2,8 +2,9 @@ import { clsx } from "clsx";
 import { Search, X } from "lucide-react";
 import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { agentDisplayName, type ExtensionKind, sortAgents } from "@/lib/types";
+import { type ExtensionKind, sortAgents } from "@/lib/types";
 import { isWeb as web, webSelectStyle } from "@/lib/web-select";
+import { AgentFilter } from "@/components/extensions/agent-filter";
 import { useAgentStore } from "@/stores/agent-store";
 import { useExtensionStore } from "@/stores/extension-store";
 import { useScopeStore } from "@/stores/scope-store";
@@ -31,18 +32,6 @@ const kinds: (ExtensionKind | null)[] = [
   "hook",
   "cli",
 ];
-/** Per-agent background + text colors for the active filter state. */
-const AGENT_FILTER_COLORS: Record<string, string> = {
-  claude: "bg-agent-claude/15 text-agent-claude border-agent-claude/30",
-  codex: "bg-agent-codex/15 text-agent-codex border-agent-codex/30",
-  gemini: "bg-agent-gemini/15 text-agent-gemini border-agent-gemini/30",
-  cursor: "bg-agent-cursor/15 text-agent-cursor border-agent-cursor/30",
-  antigravity:
-    "bg-agent-antigravity/15 text-agent-antigravity border-agent-antigravity/30",
-  copilot: "bg-agent-copilot/15 text-agent-copilot border-agent-copilot/30",
-  windsurf: "bg-agent-windsurf/15 text-agent-windsurf border-agent-windsurf/30",
-  opencode: "bg-agent-opencode/15 text-agent-opencode border-agent-opencode/30",
-};
 
 export function ExtensionFilters() {
   const { t } = useTranslation("extensions");
@@ -141,26 +130,13 @@ export function ExtensionFilters() {
         )}
         <div className="flex-1" />
         {enabledAgents.length > 0 && (
-          <select
-            value={agentFilter ?? ""}
-            onChange={(e) => setAgentFilter(e.target.value || null)}
-            aria-label={t("filters.filterByAgent")}
-            style={webSelectStyle}
-            className={clsx(
-              "shrink-0 border px-3 text-xs capitalize focus:outline-none transition-colors",
-              web ? "rounded-[6px] h-[26px]" : "rounded-lg py-1.5",
-              agentFilter && AGENT_FILTER_COLORS[agentFilter]
-                ? `${AGENT_FILTER_COLORS[agentFilter]}${web ? " font-medium" : ""}`
-                : "border-border bg-card text-foreground focus:border-ring",
-            )}
-          >
-            <option value="">{t("filters.allAgents")}</option>
-            {enabledAgents.map((agent) => (
-              <option key={agent.name} value={agent.name}>
-                {agentDisplayName(agent.name)}
-              </option>
-            ))}
-          </select>
+          <AgentFilter
+            agentFilter={agentFilter}
+            enabledAgents={enabledAgents}
+            onChange={setAgentFilter}
+            ariaLabel={t("filters.filterByAgent")}
+            allAgentsLabel={t("filters.allAgents")}
+          />
         )}
         {scopedPacks.length > 0 && (
           <select
