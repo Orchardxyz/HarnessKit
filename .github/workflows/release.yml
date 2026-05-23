@@ -58,11 +58,16 @@ jobs:
         id: create
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Pass body through an env var so any quotes / backticks / $
+          # characters from auto-generated PR titles or hand-written
+          # release-notes don't break shell parsing of the `-f body=`
+          # argument below.
+          BODY: ${{ steps.changelog.outputs.body }}
         run: |
           RELEASE_ID=$(gh api repos/${{ github.repository }}/releases \
             -f tag_name="${{ github.ref_name }}" \
             -f name="HarnessKit ${{ github.ref_name }}" \
-            -f body="${{ steps.changelog.outputs.body }}" \
+            -f body="$BODY" \
             -F draft=true \
             --jq '.id')
           echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
