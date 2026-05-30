@@ -568,7 +568,9 @@ export default function AuditPage() {
                         ? t("finding.collapseAria", { name: group.name })
                         : t("finding.expandAria", { name: group.name })
                     }
-                    className="flex w-full cursor-pointer items-center justify-between rounded-xl px-4 py-3 transition-all duration-150 hover:bg-muted/50 hover:shadow-sm"
+                    className={`flex w-full cursor-pointer items-center justify-between px-4 py-3 transition-all duration-150 hover:bg-muted/50 hover:shadow-sm ${
+                      isOpen ? "rounded-t-xl rounded-b-none" : "rounded-xl"
+                    }`}
                   >
                     <div className="flex items-center gap-3">
                       <ChevronRight
