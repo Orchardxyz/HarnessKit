@@ -56,6 +56,7 @@ pub async fn install_from_marketplace(
     skill_id: String,
     target_agent: Option<String>,
     target_scope: ConfigScope,
+    hermes_category: Option<String>,
 ) -> Result<manager::InstallResult, HkError> {
     let store_clone = state.store.clone();
     let adapters = state.adapters.clone();
@@ -66,12 +67,16 @@ pub async fn install_from_marketplace(
                 .iter()
                 .find(|a| a.name() == agent.as_str())
                 .ok_or_else(|| HkError::Internal(format!("Agent '{}' not found", agent)))?;
-            let dir = a.skill_dir_for(&target_scope).ok_or_else(|| {
-                HkError::Internal(format!(
-                    "Agent '{}' has no skill directory for scope {:?}",
-                    agent, target_scope
-                ))
-            })?;
+            let dir = hermes_category
+                .as_deref()
+                .and_then(|cat| a.skill_dir_for_category(&target_scope, cat))
+                .or_else(|| a.skill_dir_for(&target_scope))
+                .ok_or_else(|| {
+                    HkError::Internal(format!(
+                        "Agent '{}' has no skill directory for scope {:?}",
+                        agent, target_scope
+                    ))
+                })?;
             (dir, agent.clone())
         } else {
             let a = adapters

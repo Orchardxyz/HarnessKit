@@ -323,10 +323,12 @@ pub fn scan_mcp_servers(adapter: &dyn AgentAdapter) -> Vec<Extension> {
                 tags: vec![],
                 pack,
                 permissions,
-                // Reflect the agent's own enabled state. For 7 of 8 adapters
-                // this is always true (their formats lack a disable concept);
-                // only OpenCode's schema can produce a false here, surfacing
-                // user-disabled-in-config entries as visible-but-disabled
+                // Reflect the agent's own enabled state. Most adapters always
+                // report true here (their formats lack a disable concept);
+                // OpenCode and Hermes can report false — OpenCode from its
+                // schema, Hermes from a per-server `enabled: false` (its native
+                // in-place MCP disable, see manager::toggle_mcp) — surfacing
+                // those user-disabled-in-config entries as visible-but-disabled
                 // rather than hiding them. HarnessKit's separate UI-toggled
                 // disable flow operates orthogonally via SQLite tracking.
                 enabled: server.enabled,
@@ -2327,6 +2329,10 @@ mod tests {
         // exception list explicitly.
         let adapters = crate::adapter::all_adapters();
         for a in &adapters {
+            if a.name() == "hermes" {
+                // global-only: no on-disk project convention (hermes-agent#4667)
+                continue;
+            }
             assert!(
                 !a.project_markers().is_empty(),
                 "{} must declare at least one project_marker",

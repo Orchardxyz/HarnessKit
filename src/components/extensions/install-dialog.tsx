@@ -2,9 +2,11 @@ import { ChevronLeft, FolderSearch } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AnimatedEllipsis } from "@/components/shared/animated-ellipsis";
+import { HermesCategoryPicker } from "@/components/shared/hermes-category-picker";
 import { ScopeTargetField } from "@/components/shared/scope-target-field";
 import { useFocusTrap } from "@/hooks/use-focus-trap";
 import { useScope } from "@/hooks/use-scope";
+import { canInstallAtScope } from "@/lib/agent-capabilities";
 import { openDirectoryPicker } from "@/lib/dialog";
 import { humanizeError } from "@/lib/errors";
 import { api } from "@/lib/invoke";
@@ -28,6 +30,8 @@ type Phase = "input" | "select-skills";
 export function InstallDialog({ open, mode, onClose }: InstallDialogProps) {
   const { t } = useTranslation("extensions");
   const { t: tc } = useTranslation("common");
+  // Reuse the marketplace "kind not supported at scope" tooltip key.
+  const { t: tm } = useTranslation("marketplace");
   const [source, setSource] = useState("");
   const [selectedAgents, setSelectedAgents] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
@@ -38,6 +42,8 @@ export function InstallDialog({ open, mode, onClose }: InstallDialogProps) {
   );
   const [selectedSkills, setSelectedSkills] = useState<Set<string>>(new Set());
   const [cloneId, setCloneId] = useState<string | null>(null);
+  const [hermesCategories, setHermesCategories] = useState<string[]>([]);
+  const [hermesCategory, setHermesCategory] = useState<string>("local");
   const fetch = useExtensionStore((s) => s.fetch);
   const { agents, fetch: fetchAgents, agentOrder } = useAgentStore();
   const { scope } = useScope();
@@ -59,6 +65,16 @@ export function InstallDialog({ open, mode, onClose }: InstallDialogProps) {
     agentOrder,
   );
 
+  // Agents that can actually be installed to at the chosen scope. Before a
+  // target is picked (All-scopes mode) every detected agent is a candidate;
+  // once a project scope is chosen, scope-incapable agents (e.g. Hermes) drop
+  // out so bulk select-all never queues them.
+  const capableAgents = detectedAgents.filter(
+    (a) =>
+      !installTargetScope ||
+      canInstallAtScope(a.name, "skill", installTargetScope),
+  );
+
   // If only one agent detected, auto-select it
   const singleAgentName =
     detectedAgents.length === 1 ? detectedAgents[0].name : null;
@@ -67,6 +83,23 @@ export function InstallDialog({ open, mode, onClose }: InstallDialogProps) {
       setSelectedAgents(new Set([singleAgentName]));
     }
   }, [singleAgentName]);
+
+  const hermesSelected = selectedAgents.has("hermes");
+
+  // Fetch Hermes categories when Hermes is a selected target.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: fetch once when Hermes is selected; reading hermesCategory only to keep a still-valid pick, so it must not be a dependency (would refetch on every category change).
+  useEffect(() => {
+    if (!hermesSelected) return;
+    api
+      .listHermesCategories()
+      .then((cats) => {
+        setHermesCategories(cats);
+        if (!cats.includes(hermesCategory)) {
+          setHermesCategory(cats[0] ?? "local");
+        }
+      })
+      .catch(() => {});
+  }, [hermesSelected]);
 
   // Reset form when closing
   useEffect(() => {
@@ -77,11 +110,25 @@ export function InstallDialog({ open, mode, onClose }: InstallDialogProps) {
       setDiscoveredSkills([]);
       setSelectedSkills(new Set());
       setCloneId(null);
+      setHermesCategory("local");
       setInstallTargetScope(
         scope.type === "all" ? null : (scope as ConfigScope),
       );
     }
   }, [open, scope]);
+
+  // Drop agents that don't support the chosen scope (e.g. Hermes at project).
+  useEffect(() => {
+    if (!installTargetScope) return;
+    setSelectedAgents((prev) => {
+      const next = new Set(
+        [...prev].filter((name) =>
+          canInstallAtScope(name, "skill", installTargetScope),
+        ),
+      );
+      return next.size === prev.size ? prev : next;
+    });
+  }, [installTargetScope]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -103,14 +150,17 @@ export function InstallDialog({ open, mode, onClose }: InstallDialogProps) {
     });
   };
 
+  // "All" reflects every agent installable at the current scope, so it shows
+  // checked even when a scope-incapable agent (e.g. Hermes at project) is
+  // present and hidden from selection.
   const allAgentsSelected =
-    detectedAgents.length > 0 &&
-    detectedAgents.every((a) => selectedAgents.has(a.name));
+    capableAgents.length > 0 &&
+    capableAgents.every((a) => selectedAgents.has(a.name));
   const toggleAllAgents = () => {
     if (allAgentsSelected) {
       setSelectedAgents(new Set());
     } else {
-      setSelectedAgents(new Set(detectedAgents.map((a) => a.name)));
+      setSelectedAgents(new Set(capableAgents.map((a) => a.name)));
     }
   };
 
@@ -148,11 +198,13 @@ export function InstallDialog({ open, mode, onClose }: InstallDialogProps) {
     setLoading(true);
     setError(null);
     try {
+      const effectiveHermesCategory = hermesCategory.trim() || "local";
       if (mode === "local") {
         const result = await api.installFromLocal(
           source.trim(),
           [...selectedAgents],
           installTargetScope,
+          hermesSelected ? effectiveHermesCategory : undefined,
         );
         await fetch();
         onClose();
@@ -306,21 +358,41 @@ export function InstallDialog({ open, mode, onClose }: InstallDialogProps) {
                       {t("install.allAgents")}
                     </label>
                     <span className="text-border">|</span>
-                    {detectedAgents.map((a) => (
-                      <label
-                        key={a.name}
-                        className="flex items-center gap-1.5 text-xs text-foreground"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedAgents.has(a.name)}
-                          onChange={() => toggleAgent(a.name)}
-                          disabled={loading}
-                          className="rounded border-border accent-primary"
-                        />
-                        {agentDisplayName(a.name)}
-                      </label>
-                    ))}
+                    {detectedAgents.map((a) => {
+                      // ConfigScope ⊂ ScopeValue, so installTargetScope passes
+                      // through canInstallAtScope's ScopeValue param directly.
+                      const capableAtScope =
+                        !installTargetScope ||
+                        canInstallAtScope(a.name, "skill", installTargetScope);
+                      return (
+                        <label
+                          key={a.name}
+                          title={
+                            capableAtScope
+                              ? undefined
+                              : tm("detail.kindNotSupported", {
+                                  agent: a.name,
+                                })
+                          }
+                          className={`flex items-center gap-1.5 text-xs ${
+                            capableAtScope
+                              ? "text-foreground"
+                              : "text-muted-foreground/50"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={
+                              capableAtScope && selectedAgents.has(a.name)
+                            }
+                            onChange={() => toggleAgent(a.name)}
+                            disabled={loading || !capableAtScope}
+                            className="rounded border-border accent-primary"
+                          />
+                          {agentDisplayName(a.name)}
+                        </label>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -330,6 +402,23 @@ export function InstallDialog({ open, mode, onClose }: InstallDialogProps) {
                   onChange={setInstallTargetScope}
                 />
               </div>
+
+              {/* Hermes category picker — only when Hermes is a selected target */}
+              {hermesSelected && (
+                <div className="mt-3">
+                  <span className="text-xs text-muted-foreground">
+                    Hermes category
+                  </span>
+                  <div className="mt-1.5">
+                    <HermesCategoryPicker
+                      categories={hermesCategories}
+                      value={hermesCategory}
+                      onChange={setHermesCategory}
+                      disabled={loading}
+                    />
+                  </div>
+                </div>
+              )}
             </>
           ) : (
             <>

@@ -4,6 +4,7 @@ pub mod codex;
 pub mod copilot;
 pub mod cursor;
 pub mod gemini;
+pub mod hermes;
 pub mod hook_events;
 pub mod opencode;
 pub mod windsurf;
@@ -92,6 +93,10 @@ pub enum HookFormat {
     Copilot,
     /// Windsurf: {"hooks": {"event": [{"command": "cmd"}]}}
     Windsurf,
+    /// Hermes: YAML config.yaml with root `hooks:` key. Each `hooks.<event>`
+    /// is a list of `{matcher?, command, timeout?}`. Routed through dedicated
+    /// YAML helpers in deployer.rs (NOT locked_modify_json, which is JSON-only).
+    HermesYaml,
     /// Agent does not support hooks
     None,
 }
@@ -125,6 +130,10 @@ pub enum McpFormat {
     /// extra fields may be written.
     /// See https://opencode.ai/config.json (McpLocalConfig).
     Opencode,
+    /// YAML config.yaml with "mcp_servers" top-level key (Hermes).
+    /// Each entry may be URL-based ({url: "..."}) or command-based ({command: "..."}).
+    /// URL-based entries are stored with the URL in the `command` field and empty args.
+    HermesYaml,
 }
 
 pub trait AgentAdapter: Send + Sync {
@@ -174,6 +183,18 @@ pub trait AgentAdapter: Send + Sync {
     /// launched from a GUI without sourcing interactive shell rc files).
     /// Default false — only override for agents with confirmed reports.
     fn needs_path_injection(&self) -> bool {
+        false
+    }
+
+    /// Whether this agent's MCP config format carries a native per-server
+    /// `enabled: bool` that HarnessKit should toggle IN PLACE, instead of the
+    /// default disable (remove the entry + snapshot it in the DB + redact env).
+    ///
+    /// Agents returning `true` are dispatched to a dedicated in-place writer in
+    /// `manager::toggle_mcp`; their disabled state lives in the agent's own
+    /// config file and is read back by `read_mcp_servers`, so no DB snapshot is
+    /// taken. Default `false` (the remove+snapshot path).
+    fn supports_native_mcp_toggle(&self) -> bool {
         false
     }
 
@@ -307,6 +328,13 @@ pub trait AgentAdapter: Send + Sync {
         vec![]
     }
 
+    /// List available skill category names for agents that organise skills
+    /// into subdirectories (e.g. Hermes: `~/.hermes/skills/{category}/`).
+    /// Returns an empty vec for agents that use a flat skill directory.
+    fn list_skill_categories(&self) -> Vec<String> {
+        vec![]
+    }
+
     /// Resolve the MCP config file for a given scope.
     /// - `Global` → adapter's user-scope path (`mcp_config_path()`).
     /// - `Project` → `<project>/<project_mcp_config_relpath()>`, or `None`
@@ -345,6 +373,18 @@ pub trait AgentAdapter: Send + Sync {
                 .map(|rel| std::path::Path::new(path).join(rel)),
         }
     }
+
+    /// Resolve a category-specific skill directory for agents that organise
+    /// skills into named subdirectories (e.g. Hermes: `~/.hermes/skills/{category}/`).
+    /// Returns `None` for agents with a flat skill layout, letting callers fall
+    /// back to `skill_dir_for(scope)`.
+    fn skill_dir_for_category(
+        &self,
+        _scope: &ConfigScope,
+        _category: &str,
+    ) -> Option<std::path::PathBuf> {
+        None
+    }
 }
 
 fn pick_unique_concrete(patterns: Vec<String>) -> Option<String> {
@@ -370,6 +410,7 @@ pub fn all_adapters() -> Vec<Box<dyn AgentAdapter>> {
         Box::new(copilot::CopilotAdapter::new()),
         Box::new(windsurf::WindsurfAdapter::new()),
         Box::new(opencode::OpencodeAdapter::new()),
+        Box::new(hermes::HermesAdapter::new()),
     ]
 }
 
@@ -378,9 +419,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_all_adapters_returns_eight() {
+    fn test_all_adapters_returns_nine() {
         let adapters = all_adapters();
-        assert_eq!(adapters.len(), 8);
+        assert_eq!(adapters.len(), 9);
         let names: Vec<&str> = adapters.iter().map(|a| a.name()).collect();
         assert!(names.contains(&"claude"));
         assert!(names.contains(&"cursor"));
@@ -390,6 +431,7 @@ mod tests {
         assert!(names.contains(&"copilot"));
         assert!(names.contains(&"windsurf"));
         assert!(names.contains(&"opencode"));
+        assert!(names.contains(&"hermes"));
     }
 
     #[test]
@@ -409,11 +451,45 @@ mod tests {
         // setups). Adding an agent here without a confirmed PATH bug would
         // unnecessarily rewrite users' mcp_config.json with absolute paths,
         // hurting cross-machine portability.
-        for name in ["claude", "codex", "gemini", "cursor", "copilot", "opencode"] {
+        for name in ["claude", "codex", "gemini", "cursor", "copilot", "opencode", "hermes"] {
             assert!(
                 !by_name[name].needs_path_injection(),
                 "{name} should not need path injection"
             );
+        }
+    }
+
+    #[test]
+    fn test_supports_native_mcp_toggle_only_hermes() {
+        let adapters = all_adapters();
+        for a in &adapters {
+            let expected = a.name() == "hermes";
+            assert_eq!(
+                a.supports_native_mcp_toggle(),
+                expected,
+                "{} supports_native_mcp_toggle should be {expected}",
+                a.name()
+            );
+        }
+    }
+
+    #[test]
+    fn test_skill_dir_for_category_default_is_none_except_hermes() {
+        // The install handlers rely on this contract: only category-aware
+        // agents resolve a dir here; everyone else returns None and falls
+        // back to skill_dir_for(). Hermes is the sole override today.
+        let adapters = all_adapters();
+        for a in &adapters {
+            let resolved = a.skill_dir_for_category(&ConfigScope::Global, "devops");
+            if a.name() == "hermes" {
+                assert!(resolved.is_some(), "hermes should resolve a category dir");
+            } else {
+                assert!(
+                    resolved.is_none(),
+                    "{} should not resolve a category dir",
+                    a.name()
+                );
+            }
         }
     }
 
@@ -481,6 +557,9 @@ mod tests {
         // skill concept, drop it from this assertion explicitly.
         let adapters = all_adapters();
         for a in &adapters {
+            if a.name() == "hermes" {
+                continue; // global-only: no project skills (hermes-agent#4667)
+            }
             assert!(
                 !a.project_skill_dirs().is_empty(),
                 "{} must declare project_skill_dirs (Universal Agent Skills standard)",
@@ -503,10 +582,14 @@ mod tests {
             ("antigravity", ".agents/skills"), // 1.18.4+ canonical; .agent/ kept as backward-compat alias
             ("copilot", ".github/skills"),
             ("opencode", ".opencode/skills"),
+            // hermes is global-only — no project skill dir (hermes-agent#4667).
         ]
         .into_iter()
         .collect();
         for a in &adapters {
+            if a.name() == "hermes" {
+                continue; // global-only: no project skills (hermes-agent#4667)
+            }
             let actual = a.project_skill_dirs().into_iter().next().unwrap();
             let want = expected.get(a.name()).expect("adapter not in expected map");
             assert_eq!(&actual, want, "{} project skill path mismatch", a.name());
