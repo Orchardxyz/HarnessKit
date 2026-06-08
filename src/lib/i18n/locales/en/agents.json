@@ -46,7 +46,8 @@
     "pathUpdateFailed": "Failed to update {{agent}} path",
     "agentEnabled": "{{agent}} enabled",
     "agentDisabled": "{{agent}} disabled",
-    "updateFailed": "Failed to update {{agent}}"
+    "updateFailed": "Failed to update {{agent}}",
+    "bulkUpdateFailed": "Failed to update some agents"
   },
   "summary": {
     "title": "Extensions",

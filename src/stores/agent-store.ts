@@ -74,16 +74,23 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
   async setEnabledBulk(names: string[], enabled: boolean) {
     if (names.length === 0) return;
-    try {
-      await Promise.all(names.map((n) => api.setAgentEnabled(n, enabled)));
-      const target = new Set(names);
+    // allSettled, not all: a single failed (or stale) agent must not drop the
+    // store update for the ones that did succeed.
+    const results = await Promise.allSettled(
+      names.map((n) => api.setAgentEnabled(n, enabled)),
+    );
+    const ok = new Set(
+      names.filter((_, i) => results[i].status === "fulfilled"),
+    );
+    if (ok.size > 0) {
       set({
         agents: get().agents.map((a) =>
-          target.has(a.name) ? { ...a, enabled } : a,
+          ok.has(a.name) ? { ...a, enabled } : a,
         ),
       });
-    } catch {
-      toast.error(i18n.t("agents:toast.updateFailed", { agent: "" }));
+    }
+    if (ok.size < names.length) {
+      toast.error(i18n.t("agents:toast.bulkUpdateFailed"));
     }
   },
   async reorderAgents(orderedNames: string[]) {

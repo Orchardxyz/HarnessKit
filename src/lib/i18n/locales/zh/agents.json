@@ -46,7 +46,8 @@
     "pathUpdateFailed": "更新 {{agent}} 路径失败",
     "agentEnabled": "已启用 {{agent}}",
     "agentDisabled": "已禁用 {{agent}}",
-    "updateFailed": "更新 {{agent}} 失败"
+    "updateFailed": "更新 {{agent}} 失败",
+    "bulkUpdateFailed": "部分智能体更新失败"
   },
   "summary": {
     "title": "扩展",

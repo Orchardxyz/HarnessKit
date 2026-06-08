@@ -388,6 +388,10 @@ export default function SettingsPage() {
               {agentNames.map((agent) => {
                 const info = agentMap.get(agent);
                 const isEnabled = info?.enabled ?? true;
+                // In "Detected only" we auto-disable undetected agents, so lock
+                // their toggle — switch to "All agents" to change them. Detected
+                // agents stay toggleable: enabling/disabling them is the user's
+                // call.
                 const locked =
                   agentVisibility === "detected" && !(info?.detected ?? false);
                 return (
@@ -401,15 +405,17 @@ export default function SettingsPage() {
                     <button
                       type="button"
                       disabled={locked}
-                      title={
-                        locked ? t("agentPaths.visibilityHint") : undefined
-                      }
+                      title={locked ? t("agentPaths.lockedHint") : undefined}
                       onClick={() => setEnabled(agent, !isEnabled)}
                       className={clsx(
                         "shrink-0 w-16 text-center rounded-md px-2 py-0.5 text-xs font-medium transition-colors",
                         isEnabled
-                          ? "bg-primary/10 text-primary hover:bg-primary/20"
-                          : "bg-muted text-muted-foreground hover:bg-muted/80",
+                          ? "bg-primary/10 text-primary"
+                          : "bg-muted text-muted-foreground",
+                        !locked &&
+                          (isEnabled
+                            ? "hover:bg-primary/20"
+                            : "hover:bg-muted/80"),
                         locked && "cursor-not-allowed opacity-60",
                       )}
                     >
