@@ -235,18 +235,14 @@ export default function SettingsPage() {
   const agentNames = agentOrder;
   const agentMap = new Map(agents.map((a) => [a.name.toLowerCase(), a]));
 
-  // Switching to "Detected only" snapshots which enabled-but-undetected agents
-  // get auto-disabled, so switching back to "All agents" re-enables exactly
-  // those — never agents the user disabled by hand.
+  // Entering "Detected only" is handled by the App-level reconcile effect: it
+  // disables undetected agents and records them in the snapshot (so it also
+  // catches agents added by a later app update). Here we only restore that
+  // snapshot on the way back to "All agents" — re-enabling exactly those, never
+  // agents the user disabled by hand.
   const handleVisibilityChange = (next: AgentVisibility) => {
     if (next === agentVisibility) return;
-    if (next === "detected") {
-      const toDisable = agents
-        .filter((a) => !a.detected && a.enabled)
-        .map((a) => a.name);
-      setAutoDisabledAgents(toDisable);
-      setEnabledBulk(toDisable, false);
-    } else {
+    if (next === "all") {
       setEnabledBulk(autoDisabledAgents, true);
       setAutoDisabledAgents([]);
     }
