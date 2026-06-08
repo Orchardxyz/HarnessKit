@@ -20,15 +20,15 @@
     "modeToast": "Mode: {{label}}",
     "appIcon": "App Icon",
     "iconToast": "Icon: {{label}}",
-    "iconFailed": "Failed to set icon",
-    "agentVisibility": "Agent Visibility",
-    "agentVisibilityAll": "All agents",
-    "agentVisibilityDetected": "Detected only",
-    "agentVisibilityToast": "Visibility: {{label}}"
+    "iconFailed": "Failed to set icon"
   },
   "agentPaths": {
     "section": "Agent Paths",
     "description": "Auto-detected paths shown below. Click the edit button to choose a custom path.",
+    "visibilityAll": "All agents",
+    "visibilityDetected": "Detected only",
+    "visibilityToast": "Visibility: {{label}}",
+    "visibilityHint": "Detected only also hides and disables undetected agents.",
     "enabled": "Enabled",
     "disabled": "Disabled",
     "notDetected": "Not detected",

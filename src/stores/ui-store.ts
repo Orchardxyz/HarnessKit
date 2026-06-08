@@ -21,17 +21,42 @@ function getValidItem<T extends string>(
     : fallback;
 }
 
+/**
+ * Reads a JSON string array from localStorage, falling back to an empty array
+ * if storage is unavailable, missing, or malformed.
+ */
+function getStoredStringArray(key: string): string[] {
+  if (typeof localStorage === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.every((v) => typeof v === "string")
+      ? parsed
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 interface UIState {
   sidebarOpen: boolean;
   themeName: ThemeName;
   mode: Mode;
   appIcon: AppIcon;
   agentVisibility: AgentVisibility;
+  /**
+   * Agents that "Detected only" visibility auto-disabled, so switching back to
+   * "All agents" can re-enable exactly those (and not agents the user disabled
+   * manually). Persisted so the restore survives a restart.
+   */
+  autoDisabledAgents: string[];
   toggleSidebar: () => void;
   setThemeName: (name: ThemeName) => void;
   setMode: (mode: Mode) => void;
   setAppIcon: (icon: AppIcon) => void;
   setAgentVisibility: (visibility: AgentVisibility) => void;
+  setAutoDisabledAgents: (names: string[]) => void;
 }
 
 const ALLOWED_MODES: readonly Mode[] = ["system", "dark", "light"];
@@ -54,6 +79,7 @@ const storedAgentVisibility = getValidItem(
   ALLOWED_AGENT_VISIBILITY,
   "all",
 );
+const storedAutoDisabledAgents = getStoredStringArray("hk-agent-auto-disabled");
 
 /** Resolve "system" to actual light/dark based on OS preference */
 export function resolveMode(mode: Mode): "dark" | "light" {
@@ -69,6 +95,7 @@ export const useUIStore = create<UIState>((set) => ({
   mode: storedMode,
   appIcon: storedAppIcon,
   agentVisibility: storedAgentVisibility,
+  autoDisabledAgents: storedAutoDisabledAgents,
   toggleSidebar() {
     set((s) => ({ sidebarOpen: !s.sidebarOpen }));
   },
@@ -87,5 +114,12 @@ export const useUIStore = create<UIState>((set) => ({
   setAgentVisibility(agentVisibility) {
     localStorage.setItem("hk-agent-visibility", agentVisibility);
     set({ agentVisibility });
+  },
+  setAutoDisabledAgents(autoDisabledAgents) {
+    localStorage.setItem(
+      "hk-agent-auto-disabled",
+      JSON.stringify(autoDisabledAgents),
+    );
+    set({ autoDisabledAgents });
   },
 }));

@@ -73,12 +73,10 @@ const LANGUAGE_OPTIONS: {
 
 const AGENT_VISIBILITY_OPTIONS: {
   value: AgentVisibility;
-  labelKey:
-    | "appearance.agentVisibilityAll"
-    | "appearance.agentVisibilityDetected";
+  labelKey: "agentPaths.visibilityAll" | "agentPaths.visibilityDetected";
 }[] = [
-  { value: "all", labelKey: "appearance.agentVisibilityAll" },
-  { value: "detected", labelKey: "appearance.agentVisibilityDetected" },
+  { value: "all", labelKey: "agentPaths.visibilityAll" },
+  { value: "detected", labelKey: "agentPaths.visibilityDetected" },
 ];
 
 function UpdateSection() {
@@ -183,10 +181,12 @@ export default function SettingsPage() {
     mode,
     appIcon,
     agentVisibility,
+    autoDisabledAgents,
     setThemeName,
     setMode,
     setAppIcon: setAppIconState,
     setAgentVisibility,
+    setAutoDisabledAgents,
   } = useUIStore();
   const { projects, loading, loadProjects, addProject, removeProject } =
     useProjectStore();
@@ -196,6 +196,7 @@ export default function SettingsPage() {
     fetch: fetchAgents,
     updatePath,
     setEnabled,
+    setEnabledBulk,
   } = useAgentStore();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -233,6 +234,32 @@ export default function SettingsPage() {
   const agentOrder = useAgentStore((s) => s.agentOrder);
   const agentNames = agentOrder;
   const agentMap = new Map(agents.map((a) => [a.name.toLowerCase(), a]));
+
+  // Switching to "Detected only" snapshots which enabled-but-undetected agents
+  // get auto-disabled, so switching back to "All agents" re-enables exactly
+  // those — never agents the user disabled by hand.
+  const handleVisibilityChange = (next: AgentVisibility) => {
+    if (next === agentVisibility) return;
+    if (next === "detected") {
+      const toDisable = agents
+        .filter((a) => !a.detected && a.enabled)
+        .map((a) => a.name);
+      setAutoDisabledAgents(toDisable);
+      setEnabledBulk(toDisable, false);
+    } else {
+      setEnabledBulk(autoDisabledAgents, true);
+      setAutoDisabledAgents([]);
+    }
+    setAgentVisibility(next);
+    toast.success(
+      t("agentPaths.visibilityToast", {
+        label: t(
+          AGENT_VISIBILITY_OPTIONS.find((o) => o.value === next)?.labelKey ??
+            "agentPaths.visibilityAll",
+        ),
+      }),
+    );
+  };
 
   const existingPaths = new Set(projects.map((p) => p.path));
 
@@ -321,18 +348,48 @@ export default function SettingsPage() {
         <div className="max-w-2xl mx-auto space-y-8 pb-6">
           {/* Agent Paths */}
           <section className="space-y-4">
-            <div>
-              <h3 className="text-sm font-medium text-muted-foreground">
-                {t("agentPaths.section")}
-              </h3>
-              <p className="text-xs text-muted-foreground mt-1">
-                {t("agentPaths.description")}
-              </p>
+            {/* Header: title + description, with visibility toggle top-right */}
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-sm font-medium text-muted-foreground">
+                  {t("agentPaths.section")}
+                </h3>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {t("agentPaths.description")}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {t("agentPaths.visibilityHint")}
+                </p>
+              </div>
+              <div className="flex shrink-0 rounded-lg border border-border">
+                {AGENT_VISIBILITY_OPTIONS.map((opt, i) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => handleVisibilityChange(opt.value)}
+                    aria-pressed={agentVisibility === opt.value}
+                    className={clsx(
+                      "px-3 py-1 text-xs font-medium transition-colors duration-200",
+                      i === 0 && "rounded-l-lg",
+                      i === AGENT_VISIBILITY_OPTIONS.length - 1 &&
+                        "rounded-r-lg",
+                      agentVisibility === opt.value
+                        ? "bg-primary text-primary-foreground shadow-sm"
+                        : "text-muted-foreground hover:bg-accent",
+                    )}
+                  >
+                    {t(opt.labelKey)}
+                  </button>
+                ))}
+              </div>
             </div>
+
             <div className="flex flex-col rounded-lg border border-border bg-card shadow-sm divide-y divide-border">
               {agentNames.map((agent) => {
                 const info = agentMap.get(agent);
                 const isEnabled = info?.enabled ?? true;
+                const locked =
+                  agentVisibility === "detected" && !(info?.detected ?? false);
                 return (
                   <div
                     key={agent}
@@ -343,12 +400,17 @@ export default function SettingsPage() {
                   >
                     <button
                       type="button"
+                      disabled={locked}
+                      title={
+                        locked ? t("agentPaths.visibilityHint") : undefined
+                      }
                       onClick={() => setEnabled(agent, !isEnabled)}
                       className={clsx(
                         "shrink-0 w-16 text-center rounded-md px-2 py-0.5 text-xs font-medium transition-colors",
                         isEnabled
                           ? "bg-primary/10 text-primary hover:bg-primary/20"
                           : "bg-muted text-muted-foreground hover:bg-muted/80",
+                        locked && "cursor-not-allowed opacity-60",
                       )}
                     >
                       {isEnabled
@@ -778,42 +840,6 @@ export default function SettingsPage() {
                   </div>
                 </>
               )}
-
-              <div className="border-t border-border" />
-
-              {/* Agent Visibility */}
-              <div className="flex items-center justify-between">
-                <span className="text-sm">
-                  {t("appearance.agentVisibility")}
-                </span>
-                <div className="flex rounded-lg border border-border">
-                  {AGENT_VISIBILITY_OPTIONS.map((opt, i) => (
-                    <button
-                      key={opt.value}
-                      onClick={() => {
-                        setAgentVisibility(opt.value);
-                        toast.success(
-                          t("appearance.agentVisibilityToast", {
-                            label: t(opt.labelKey),
-                          }),
-                        );
-                      }}
-                      aria-pressed={agentVisibility === opt.value}
-                      className={clsx(
-                        "px-3 py-1 text-xs font-medium transition-colors duration-200",
-                        i === 0 && "rounded-l-lg",
-                        i === AGENT_VISIBILITY_OPTIONS.length - 1 &&
-                          "rounded-r-lg",
-                        agentVisibility === opt.value
-                          ? "bg-primary text-primary-foreground shadow-sm"
-                          : "text-muted-foreground hover:bg-accent",
-                      )}
-                    >
-                      {t(opt.labelKey)}
-                    </button>
-                  ))}
-                </div>
-              </div>
             </div>
           </section>
 
