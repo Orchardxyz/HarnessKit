@@ -18,13 +18,14 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { clsx } from "clsx";
 import { GripVertical } from "lucide-react";
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { AgentMascot } from "@/components/shared/agent-mascot/agent-mascot";
 import type { AgentDetail } from "@/lib/types";
 import { agentDisplayName } from "@/lib/types";
 import { useAgentConfigStore } from "@/stores/agent-config-store";
 import { useAgentStore } from "@/stores/agent-store";
+import { useUIStore } from "@/stores/ui-store";
 
 function SortableAgentItem({
   agent,
@@ -99,6 +100,7 @@ export function AgentList() {
   const selectAgent = useAgentConfigStore((s) => s.selectAgent);
   const agentOrder = useAgentStore((s) => s.agentOrder);
   const reorderAgents = useAgentStore((s) => s.reorderAgents);
+  const agentVisibility = useUIStore((s) => s.agentVisibility);
 
   const sorted = useMemo(
     () =>
@@ -109,6 +111,37 @@ export function AgentList() {
       }),
     [agentDetails, agentOrder],
   );
+
+  const visible = useMemo(
+    () =>
+      agentVisibility === "detected"
+        ? sorted.filter((a) => a.detected)
+        : sorted,
+    [sorted, agentVisibility],
+  );
+
+  const hidden = useMemo(
+    () =>
+      new Set(
+        agentVisibility === "detected"
+          ? sorted.filter((a) => !a.detected).map((a) => a.name)
+          : [],
+      ),
+    [sorted, agentVisibility],
+  );
+
+  useEffect(() => {
+    if (agentVisibility !== "detected") return;
+    if (!selectedAgent) return;
+    const isSelectedVisible = visible.some((a) => a.name === selectedAgent);
+    if (!isSelectedVisible) {
+      if (visible.length > 0) {
+        selectAgent(visible[0].name);
+      } else {
+        selectAgent(null);
+      }
+    }
+  }, [agentVisibility, visible, selectedAgent, selectAgent]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -122,15 +155,53 @@ export function AgentList() {
       const { active, over } = event;
       if (!over || active.id === over.id) return;
 
-      const names = sorted.map((a) => a.name);
-      const oldIndex = names.indexOf(active.id as string);
-      const newIndex = names.indexOf(over.id as string);
+      const visibleNames = visible.map((a) => a.name);
+      const oldIndex = visibleNames.indexOf(active.id as string);
+      const newIndex = visibleNames.indexOf(over.id as string);
       if (oldIndex === -1 || newIndex === -1) return;
 
-      reorderAgents(arrayMove(names, oldIndex, newIndex));
+      const reorderedVisible = arrayMove(visibleNames, oldIndex, newIndex);
+
+      let fullOrder: string[];
+      if (hidden.size === 0) {
+        fullOrder = reorderedVisible;
+      } else {
+        const result: string[] = [];
+        let vi = 0;
+        for (const name of agentOrder) {
+          if (hidden.has(name)) {
+            result.push(name);
+          } else {
+            if (vi < reorderedVisible.length) {
+              result.push(reorderedVisible[vi]);
+              vi++;
+            }
+          }
+        }
+        while (vi < reorderedVisible.length) {
+          result.push(reorderedVisible[vi]);
+          vi++;
+        }
+        fullOrder = result;
+      }
+
+      reorderAgents(fullOrder);
     },
-    [sorted, reorderAgents],
+    [visible, hidden, agentOrder, reorderAgents],
   );
+
+  if (visible.length === 0) {
+    return (
+      <div className="flex flex-col gap-0.5 p-2">
+        <div className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          {t("list.header")}
+        </div>
+        <div className="px-3 py-6 text-xs text-muted-foreground text-center">
+          {t("list.noDetected")}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-0.5 p-2">
@@ -144,10 +215,10 @@ export function AgentList() {
         onDragEnd={handleDragEnd}
       >
         <SortableContext
-          items={sorted.map((a) => a.name)}
+          items={visible.map((a) => a.name)}
           strategy={verticalListSortingStrategy}
         >
-          {sorted.map((agent) => (
+          {visible.map((agent) => (
             <SortableAgentItem
               key={agent.name}
               agent={agent}

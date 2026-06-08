@@ -3,6 +3,7 @@ import { create } from "zustand";
 export type ThemeName = "tiesen" | "claude";
 export type Mode = "system" | "dark" | "light";
 export type AppIcon = "icon-1" | "icon-2";
+export type AgentVisibility = "all" | "detected";
 
 /**
  * Safely retrieves and validates a localStorage value against allowed values.
@@ -25,15 +26,21 @@ interface UIState {
   themeName: ThemeName;
   mode: Mode;
   appIcon: AppIcon;
+  agentVisibility: AgentVisibility;
   toggleSidebar: () => void;
   setThemeName: (name: ThemeName) => void;
   setMode: (mode: Mode) => void;
   setAppIcon: (icon: AppIcon) => void;
+  setAgentVisibility: (visibility: AgentVisibility) => void;
 }
 
 const ALLOWED_MODES: readonly Mode[] = ["system", "dark", "light"];
 const ALLOWED_THEME_NAMES: readonly ThemeName[] = ["tiesen", "claude"];
 const ALLOWED_APP_ICONS: readonly AppIcon[] = ["icon-1", "icon-2"];
+const ALLOWED_AGENT_VISIBILITY: readonly AgentVisibility[] = [
+  "all",
+  "detected",
+];
 
 const storedMode = getValidItem("hk-theme", ALLOWED_MODES, "system");
 const storedThemeName = getValidItem(
@@ -42,6 +49,11 @@ const storedThemeName = getValidItem(
   "tiesen",
 );
 const storedAppIcon = getValidItem("hk-app-icon", ALLOWED_APP_ICONS, "icon-1");
+const storedAgentVisibility = getValidItem(
+  "hk-agent-visibility",
+  ALLOWED_AGENT_VISIBILITY,
+  "all",
+);
 
 /** Resolve "system" to actual light/dark based on OS preference */
 export function resolveMode(mode: Mode): "dark" | "light" {
@@ -56,6 +68,7 @@ export const useUIStore = create<UIState>((set) => ({
   themeName: storedThemeName,
   mode: storedMode,
   appIcon: storedAppIcon,
+  agentVisibility: storedAgentVisibility,
   toggleSidebar() {
     set((s) => ({ sidebarOpen: !s.sidebarOpen }));
   },
@@ -70,5 +83,9 @@ export const useUIStore = create<UIState>((set) => ({
   setAppIcon(appIcon) {
     localStorage.setItem("hk-app-icon", appIcon);
     set({ appIcon });
+  },
+  setAgentVisibility(agentVisibility) {
+    localStorage.setItem("hk-agent-visibility", agentVisibility);
+    set({ agentVisibility });
   },
 }));

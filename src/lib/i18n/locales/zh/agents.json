@@ -1,7 +1,8 @@
 {
   "list": {
     "header": "智能体",
-    "notDetected": "未检测到"
+    "notDetected": "未检测到",
+    "noDetected": "未检测到智能体"
   },
   "detail": {
     "selectAgent": "选择一个智能体以查看其配置",

@@ -27,7 +27,7 @@ import { agentDisplayName, type DiscoveredProject } from "@/lib/types";
 import { useAgentStore } from "@/stores/agent-store";
 import { useProjectStore } from "@/stores/project-store";
 import { toast } from "@/stores/toast-store";
-import type { AppIcon, ThemeName } from "@/stores/ui-store";
+import type { AgentVisibility, AppIcon, ThemeName } from "@/stores/ui-store";
 import { useUIStore } from "@/stores/ui-store";
 import { useUpdateStore } from "@/stores/update-store";
 import { useWebUpdateStore } from "@/stores/web-update-store";
@@ -69,6 +69,16 @@ const LANGUAGE_OPTIONS: {
   { value: "system", labelKey: "language.system" },
   { value: "en", labelKey: "language.en" },
   { value: "zh", labelKey: "language.zh" },
+];
+
+const AGENT_VISIBILITY_OPTIONS: {
+  value: AgentVisibility;
+  labelKey:
+    | "appearance.agentVisibilityAll"
+    | "appearance.agentVisibilityDetected";
+}[] = [
+  { value: "all", labelKey: "appearance.agentVisibilityAll" },
+  { value: "detected", labelKey: "appearance.agentVisibilityDetected" },
 ];
 
 function UpdateSection() {
@@ -172,9 +182,11 @@ export default function SettingsPage() {
     themeName,
     mode,
     appIcon,
+    agentVisibility,
     setThemeName,
     setMode,
     setAppIcon: setAppIconState,
+    setAgentVisibility,
   } = useUIStore();
   const { projects, loading, loadProjects, addProject, removeProject } =
     useProjectStore();
@@ -766,6 +778,42 @@ export default function SettingsPage() {
                   </div>
                 </>
               )}
+
+              <div className="border-t border-border" />
+
+              {/* Agent Visibility */}
+              <div className="flex items-center justify-between">
+                <span className="text-sm">
+                  {t("appearance.agentVisibility")}
+                </span>
+                <div className="flex rounded-lg border border-border">
+                  {AGENT_VISIBILITY_OPTIONS.map((opt, i) => (
+                    <button
+                      key={opt.value}
+                      onClick={() => {
+                        setAgentVisibility(opt.value);
+                        toast.success(
+                          t("appearance.agentVisibilityToast", {
+                            label: t(opt.labelKey),
+                          }),
+                        );
+                      }}
+                      aria-pressed={agentVisibility === opt.value}
+                      className={clsx(
+                        "px-3 py-1 text-xs font-medium transition-colors duration-200",
+                        i === 0 && "rounded-l-lg",
+                        i === AGENT_VISIBILITY_OPTIONS.length - 1 &&
+                          "rounded-r-lg",
+                        agentVisibility === opt.value
+                          ? "bg-primary text-primary-foreground shadow-sm"
+                          : "text-muted-foreground hover:bg-accent",
+                      )}
+                    >
+                      {t(opt.labelKey)}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           </section>
 

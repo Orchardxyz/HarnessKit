@@ -20,7 +20,11 @@
     "modeToast": "模式：{{label}}",
     "appIcon": "应用图标",
     "iconToast": "图标：{{label}}",
-    "iconFailed": "设置图标失败"
+    "iconFailed": "设置图标失败",
+    "agentVisibility": "智能体可见性",
+    "agentVisibilityAll": "全部智能体",
+    "agentVisibilityDetected": "仅已检测到",
+    "agentVisibilityToast": "可见性：{{label}}"
   },
   "agentPaths": {
     "section": "智能体路径",

@@ -20,7 +20,11 @@
     "modeToast": "Mode: {{label}}",
     "appIcon": "App Icon",
     "iconToast": "Icon: {{label}}",
-    "iconFailed": "Failed to set icon"
+    "iconFailed": "Failed to set icon",
+    "agentVisibility": "Agent Visibility",
+    "agentVisibilityAll": "All agents",
+    "agentVisibilityDetected": "Detected only",
+    "agentVisibilityToast": "Visibility: {{label}}"
   },
   "agentPaths": {
     "section": "Agent Paths",

@@ -13,6 +13,7 @@ import {
 } from "@/lib/types";
 import { useAgentConfigStore } from "@/stores/agent-config-store";
 import { useExtensionStore } from "@/stores/extension-store";
+import { useUIStore } from "@/stores/ui-store";
 import { ConfigSection } from "./config-section";
 import { ExtensionsSummaryCard } from "./extensions-summary-card";
 import { SectionAnchorRail } from "./section-anchor-rail";
@@ -26,6 +27,7 @@ export function AgentDetail() {
   const allExtensions = useExtensionStore((s) => s.extensions);
   const { scope } = useScope();
   const agent = agentDetails.find((a) => a.name === selectedAgent);
+  const agentVisibility = useUIStore((s) => s.agentVisibility);
   const [showAddForm, setShowAddForm] = useState(false);
   const [customPath, setCustomPath] = useState("");
 
@@ -62,7 +64,9 @@ export function AgentDetail() {
   if (!agent) {
     return (
       <div className="flex flex-1 items-center justify-center text-muted-foreground text-sm">
-        {t("detail.selectAgent")}
+        {agentVisibility === "detected" && !agentDetails.some((a) => a.detected)
+          ? t("list.noDetected")
+          : t("detail.selectAgent")}
       </div>
     );
   }

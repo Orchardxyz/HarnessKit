@@ -21,7 +21,7 @@ interface AgentConfigState {
   pendingFocusFile: string | null;
 
   fetch: () => Promise<void>;
-  selectAgent: (name: string) => void;
+  selectAgent: (name: string | null) => void;
   expandFile: (path: string) => void;
   toggleFile: (path: string) => void;
   setPendingFocusFile: (path: string | null) => void;
@@ -82,7 +82,7 @@ export const useAgentConfigStore = create<AgentConfigState>((set, get) => ({
     }
   },
 
-  selectAgent(name: string) {
+  selectAgent(name: string | null) {
     set({ selectedAgent: name, expandedFiles: new Set() });
   },
 

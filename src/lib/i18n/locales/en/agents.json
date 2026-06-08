@@ -1,7 +1,8 @@
 {
   "list": {
     "header": "Agents",
-    "notDetected": "Not detected"
+    "notDetected": "Not detected",
+    "noDetected": "No detected agents"
   },
   "detail": {
     "selectAgent": "Select an agent to view its configuration",
