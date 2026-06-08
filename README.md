@@ -31,7 +31,7 @@
 </p>
 
 <p align="center">
-  <small><i>Every supported agent shows on the Overview by default, installed or not — to hide one, go to Settings → Agent Paths and click its "Enabled" toggle to switch it off.</i></small>
+  <small><i>Every supported agent shows on the Overview by default, installed or not. In Settings → Agent Paths, switch to "Detected only" to hide and disable undetected agents, or flip a single agent's "Enabled" toggle off.</i></small>
 </p>
 
 <br/>

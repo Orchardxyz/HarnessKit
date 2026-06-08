@@ -17,6 +17,7 @@ import KitsPage from "./pages/kits";
 import MarketplacePage from "./pages/marketplace";
 import OverviewPage from "./pages/overview";
 import SettingsPage from "./pages/settings";
+import { useAgentStore } from "./stores/agent-store";
 import { useAuditStore } from "./stores/audit-store";
 import { useExtensionStore } from "./stores/extension-store";
 import { resolveMode, useUIStore } from "./stores/ui-store";
@@ -36,6 +37,8 @@ export default function App() {
   const [showConfetti, setShowConfetti] = useState(false);
   const lastScanRef = useRef(0);
   const appIcon = useUIStore((s) => s.appIcon);
+  const agents = useAgentStore((s) => s.agents);
+  const agentVisibility = useUIStore((s) => s.agentVisibility);
 
   // Track resolved dark/light (reacts to OS changes when mode === "system")
   const [resolved, setResolved] = useState<"dark" | "light">(() =>
@@ -52,6 +55,22 @@ export default function App() {
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
   }, [mode]);
+
+  // Keep "Detected only" honest over time: undetected agents must stay disabled
+  // — including ones added by a later app update while the user stays in this
+  // mode (the per-click handler in Settings can't catch those). Reconcile
+  // whenever the agent list or visibility changes. Converges: once disabled an
+  // agent is no longer "enabled", so the next run finds nothing to do.
+  useEffect(() => {
+    if (agentVisibility !== "detected") return;
+    const stray = agents
+      .filter((a) => !a.detected && a.enabled)
+      .map((a) => a.name);
+    if (stray.length === 0) return;
+    useAgentStore.getState().setEnabledBulk(stray, false);
+    const { autoDisabledAgents, setAutoDisabledAgents } = useUIStore.getState();
+    setAutoDisabledAgents([...new Set([...autoDisabledAgents, ...stray])]);
+  }, [agents, agentVisibility]);
 
   // Check for updates on startup (non-blocking, silent failure).
   // Desktop uses Tauri's native updater; web mode polls GitHub releases.

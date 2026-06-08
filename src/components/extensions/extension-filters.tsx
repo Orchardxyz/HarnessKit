@@ -7,6 +7,7 @@ import { isWeb as web, webSelectStyle } from "@/lib/web-select";
 import { useAgentStore } from "@/stores/agent-store";
 import { useExtensionStore } from "@/stores/extension-store";
 import { useScopeStore } from "@/stores/scope-store";
+import { useUIStore } from "@/stores/ui-store";
 
 const TAG_COLORS = [
   "bg-primary/10 text-primary",
@@ -86,24 +87,30 @@ export function ExtensionFilters() {
   }, [grouped, extensions, scope]);
   const agents = useAgentStore((s) => s.agents);
   const agentOrder = useAgentStore((s) => s.agentOrder);
+  const agentVisibility = useUIStore((s) => s.agentVisibility);
   const enabledAgents = useMemo(
     () =>
       sortAgents(
-        agents.filter((a) => a.enabled),
+        agents.filter((a) =>
+          agentVisibility === "detected" ? a.enabled && a.detected : a.enabled,
+        ),
         agentOrder,
       ),
-    [agents, agentOrder],
+    [agents, agentOrder, agentVisibility],
   );
   const resultCount = filtered().length;
 
-  // Clear packFilter when the selected pack no longer exists in the current
-  // scope — otherwise the dropdown shows a stale value not in options and
-  // results read empty.
   useEffect(() => {
     if (packFilter && !scopedPacks.includes(packFilter)) {
       setPackFilter(null);
     }
   }, [packFilter, scopedPacks, setPackFilter]);
+
+  useEffect(() => {
+    if (agentFilter && !enabledAgents.some((a) => a.name === agentFilter)) {
+      setAgentFilter(null);
+    }
+  }, [agentFilter, enabledAgents, setAgentFilter]);
 
   return (
     <div className="space-y-2.5">

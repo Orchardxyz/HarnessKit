@@ -25,6 +25,11 @@
   "agentPaths": {
     "section": "Agent Paths",
     "description": "Auto-detected paths shown below. Click the edit button to choose a custom path.",
+    "visibilityAll": "All agents",
+    "visibilityDetected": "Detected only",
+    "visibilityToast": "Visibility: {{label}}",
+    "visibilityHint": "Detected only disables undetected agents.",
+    "lockedHint": "Switch to \"All agents\" to change this.",
     "enabled": "Enabled",
     "disabled": "Disabled",
     "notDetected": "Not detected",

@@ -12,6 +12,7 @@ interface AgentState {
   fetch: () => Promise<void>;
   updatePath: (name: string, path: string) => Promise<void>;
   setEnabled: (name: string, enabled: boolean) => Promise<void>;
+  setEnabledBulk: (names: string[], enabled: boolean) => Promise<void>;
   reorderAgents: (orderedNames: string[]) => Promise<void>;
 }
 
@@ -69,6 +70,27 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       toast.error(
         i18n.t("agents:toast.updateFailed", { agent: agentDisplayName(name) }),
       );
+    }
+  },
+  async setEnabledBulk(names: string[], enabled: boolean) {
+    if (names.length === 0) return;
+    // allSettled, not all: a single failed (or stale) agent must not drop the
+    // store update for the ones that did succeed.
+    const results = await Promise.allSettled(
+      names.map((n) => api.setAgentEnabled(n, enabled)),
+    );
+    const ok = new Set(
+      names.filter((_, i) => results[i].status === "fulfilled"),
+    );
+    if (ok.size > 0) {
+      set({
+        agents: get().agents.map((a) =>
+          ok.has(a.name) ? { ...a, enabled } : a,
+        ),
+      });
+    }
+    if (ok.size < names.length) {
+      toast.error(i18n.t("agents:toast.bulkUpdateFailed"));
     }
   },
   async reorderAgents(orderedNames: string[]) {
