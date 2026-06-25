@@ -305,6 +305,14 @@ pub async fn update_extension(
             let store = state.store.lock();
             let ext = store.get_extension(&params.id)?
                 .ok_or_else(|| hk_core::HkError::NotFound(format!("Extension '{}' not found", params.id)))?;
+            // The update path clones a repo and deploys it as a skill, so guard
+            // against non-skill kinds (e.g. a plugin now carrying install_type
+            // 'git') reaching it — same gate the bulk update path uses.
+            if !service::is_update_eligible(&ext) {
+                return Err(hk_core::HkError::Validation(format!(
+                    "Extension '{}' is not eligible for update", ext.name
+                )));
+            }
             let meta = ext.install_meta.clone().ok_or_else(|| {
                 hk_core::HkError::NotFound("Extension has no install metadata — cannot update".into())
             })?;
@@ -318,6 +326,17 @@ pub async fn update_extension(
             }
             (ext, meta)
         };
+
+        // Skills-CLI-managed skills update via that CLI; the follow-up rescan
+        // reflects it. Falls through to HK's clone+deploy when delegation declines.
+        if service::try_delegate_skill_update(&state.store, &ext)? {
+            return Ok(manager::InstallResult {
+                name: ext.name.clone(),
+                was_update: true,
+                revision: None,
+                skipped: false,
+            });
+        }
 
         let url = install_meta.url_resolved.as_deref()
             .or(install_meta.url.as_deref())
