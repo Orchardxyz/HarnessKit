@@ -9,11 +9,14 @@ import {
   Settings,
   Workflow,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import { useCollapsibleState } from "@/hooks/use-collapsible-state";
 import type { AgentConfigFile, ConfigCategory } from "@/lib/types";
 import { useAgentConfigStore } from "@/stores/agent-config-store";
 import { ConfigFileEntry } from "./config-file-entry";
+import { MemoryGroup } from "./memory-group";
+import { groupMemoryFiles } from "./memory-grouping";
 
 const CATEGORY_ICONS: Record<string, React.ElementType> = {
   rules: FileText,
@@ -45,40 +48,18 @@ export function ConfigSection({
   const storageKey = agentName ? collapseStorageKey(agentName, category) : null;
   const pendingFocusFile = useAgentConfigStore((s) => s.pendingFocusFile);
 
-  const [collapsed, setCollapsed] = useState<boolean>(() => {
-    if (!storageKey) return false;
-    return localStorage.getItem(storageKey) === "1";
-  });
-
-  // When the user switches agents the storageKey changes; rehydrate from disk.
-  useEffect(() => {
-    if (!storageKey) return;
-    setCollapsed(localStorage.getItem(storageKey) === "1");
-  }, [storageKey]);
+  const { collapsed, setCollapsed, toggle } = useCollapsibleState(storageKey);
 
   // If the user navigates here with a focus target (e.g. clicked a file in the
   // Overview's Agent Activity widget), and that file lives in this section,
-  // force-open it. We also clear the persisted collapse state so the section
-  // doesn't snap shut once the focus signal is consumed — the user can
-  // re-collapse with the chevron if they want.
+  // force-open it. Setting collapsed=false also clears the persisted state so
+  // the section doesn't snap shut once the focus signal is consumed — the user
+  // can re-collapse with the chevron if they want.
   const containsFocusFile =
     pendingFocusFile != null && files.some((f) => f.path === pendingFocusFile);
   useEffect(() => {
-    if (!containsFocusFile || !collapsed) return;
-    setCollapsed(false);
-    if (storageKey) localStorage.removeItem(storageKey);
-  }, [containsFocusFile, collapsed, storageKey]);
-
-  const toggle = () => {
-    setCollapsed((prev) => {
-      const next = !prev;
-      if (storageKey) {
-        if (next) localStorage.setItem(storageKey, "1");
-        else localStorage.removeItem(storageKey);
-      }
-      return next;
-    });
-  };
+    if (containsFocusFile && collapsed) setCollapsed(false);
+  }, [containsFocusFile, collapsed, setCollapsed]);
 
   if (files.length === 0) return null;
   const Icon = CATEGORY_ICONS[category] ?? Settings;
@@ -104,9 +85,17 @@ export function ConfigSection({
       </button>
       {!collapsed && (
         <div className="rounded-lg border border-border overflow-hidden">
-          {files.map((file) => (
-            <ConfigFileEntry key={file.path} file={file} />
-          ))}
+          {category === "memory"
+            ? groupMemoryFiles(files).map((group) => (
+                <MemoryGroup
+                  key={group.storePath}
+                  group={group}
+                  agentName={agentName}
+                />
+              ))
+            : files.map((file) => (
+                <ConfigFileEntry key={file.path} file={file} />
+              ))}
         </div>
       )}
     </div>

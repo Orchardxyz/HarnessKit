@@ -15,11 +15,24 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useScrollPassthrough } from "@/hooks/use-scroll-passthrough";
 import { openDirectoryPicker, openFilePicker } from "@/lib/dialog";
+import { formatBytes } from "@/lib/format";
 import { isDesktop } from "@/lib/transport";
 import type { AgentConfigFile } from "@/lib/types";
 import { useAgentConfigStore } from "@/stores/agent-config-store";
 
-export function ConfigFileEntry({ file }: { file: AgentConfigFile }) {
+export function ConfigFileEntry({
+  file,
+  hideScopePath = false,
+  inset = false,
+}: {
+  file: AgentConfigFile;
+  /** When true, hide only the scope path (the badge still shows). Used by the grouped MEMORY view where the path lives on the group header. */
+  hideScopePath?: boolean;
+  /** When true, indent the row content via extra left padding while keeping the
+   *  button full-width (so the hover highlight fills to the left edge). Used by
+   *  the grouped MEMORY view. */
+  inset?: boolean;
+}) {
   const { t } = useTranslation("agents");
   const { t: tc } = useTranslation("common");
   const expandedFiles = useAgentConfigStore((s) => s.expandedFiles);
@@ -95,10 +108,7 @@ export function ConfigFileEntry({ file }: { file: AgentConfigFile }) {
       : file.scope.type === "global"
         ? file.path.slice(0, file.path.lastIndexOf(file.file_name))
         : file.scope.path;
-  const sizeLabel =
-    file.size_bytes < 1024
-      ? `${file.size_bytes} B`
-      : `${(file.size_bytes / 1024).toFixed(1)} KB`;
+  const sizeLabel = formatBytes(file.size_bytes);
 
   return (
     <div className="border-b border-border/50 last:border-b-0">
@@ -106,7 +116,8 @@ export function ConfigFileEntry({ file }: { file: AgentConfigFile }) {
         ref={buttonRef}
         onClick={() => toggleFile(file.path)}
         className={clsx(
-          "flex w-full items-center justify-between px-4 py-2.5 text-left transition-colors hover:bg-accent/30",
+          "flex w-full items-center justify-between pr-4 py-2.5 text-left transition-colors hover:bg-accent/30",
+          inset ? "pl-8" : "pl-4",
           isExpanded && "bg-accent/20",
           highlight &&
             "ring-2 ring-primary ring-inset bg-primary/5 transition-all",
@@ -143,9 +154,11 @@ export function ConfigFileEntry({ file }: { file: AgentConfigFile }) {
                 {tc("scope.project")}
               </span>
             ))}
-          <span className="text-[11px] text-muted-foreground truncate">
-            {scopePath}
-          </span>
+          {!hideScopePath && (
+            <span className="text-[11px] text-muted-foreground truncate">
+              {scopePath}
+            </span>
+          )}
         </div>
         {!file.is_dir && (
           <span className="text-[11px] text-muted-foreground shrink-0 ml-2">
