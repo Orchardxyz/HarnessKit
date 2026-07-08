@@ -7,6 +7,7 @@ import { CursorMascot } from "./cursor-mascot";
 import { FallbackMascot } from "./fallback-mascot";
 import { GeminiMascot } from "./gemini-mascot";
 import { HermesMascot } from "./hermes-mascot";
+import { KiroMascot } from "./kiro-mascot";
 import { OpencodeMascot } from "./opencode-mascot";
 import { WindsurfMascot } from "./windsurf-mascot";
 
@@ -62,6 +63,12 @@ const MASCOT_MAP: Record<
     component: HermesMascot,
     className: "mascot-hermes",
     scale: 1,
+  },
+  kiro: {
+    component: KiroMascot,
+    className: "mascot-kiro",
+    scale: 1.12,
+    offsetY: 1,
   },
 };
 

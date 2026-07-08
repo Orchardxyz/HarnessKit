@@ -19,6 +19,7 @@
 //! - Copilot:     https://docs.github.com/en/copilot/how-tos/use-copilot-agents/coding-agent/use-hooks
 //! - Windsurf:    https://docs.windsurf.com/windsurf/cascade/hooks
 //! - Antigravity: no hook support — use rules instead: https://antigravity.google/docs/rules-workflows
+//! - Kiro IDE:    https://kiro.dev/docs/hooks/
 
 // Canonical event names (Claude's convention) used as the internal lingua franca.
 const CANONICAL_EVENTS: &[&str] = &[
@@ -337,6 +338,52 @@ const HERMES_EVENTS: &[EventMapping] = &[
     },
 ];
 
+/// Kiro IDE Agent Hook mappings.
+/// Reference: https://kiro.dev/docs/hooks/
+const KIRO_EVENTS: &[EventMapping] = &[
+    EventMapping {
+        canonical: "SessionStart",
+        agent: "SessionStart",
+    },
+    EventMapping {
+        canonical: "Stop",
+        agent: "Stop",
+    },
+    EventMapping {
+        canonical: "PreToolUse",
+        agent: "PreToolUse",
+    },
+    EventMapping {
+        canonical: "PostToolUse",
+        agent: "PostToolUse",
+    },
+    EventMapping {
+        canonical: "UserPromptSubmit",
+        agent: "UserPromptSubmit",
+    },
+    // Kiro-specific triggers.
+    EventMapping {
+        canonical: "PreTaskExec",
+        agent: "PreTaskExec",
+    },
+    EventMapping {
+        canonical: "PostTaskExec",
+        agent: "PostTaskExec",
+    },
+    EventMapping {
+        canonical: "PostFileCreate",
+        agent: "PostFileCreate",
+    },
+    EventMapping {
+        canonical: "PostFileSave",
+        agent: "PostFileSave",
+    },
+    EventMapping {
+        canonical: "PostFileDelete",
+        agent: "PostFileDelete",
+    },
+];
+
 /// Translate an event name from any agent's convention to the target agent's convention.
 /// Returns None if the event has no equivalent in the target agent.
 fn translate(
@@ -371,6 +418,7 @@ pub fn to_claude(event: &str) -> Option<String> {
         .or_else(|| translate(event, COPILOT_EVENTS, CLAUDE_EVENTS))
         .or_else(|| translate(event, WINDSURF_EVENTS, CLAUDE_EVENTS))
         .or_else(|| translate(event, HERMES_EVENTS, CLAUDE_EVENTS))
+        .or_else(|| translate(event, KIRO_EVENTS, CLAUDE_EVENTS))
 }
 
 /// Translate an event name to Gemini convention.
@@ -381,6 +429,7 @@ pub fn to_gemini(event: &str) -> Option<String> {
         .or_else(|| translate(event, COPILOT_EVENTS, GEMINI_EVENTS))
         .or_else(|| translate(event, WINDSURF_EVENTS, GEMINI_EVENTS))
         .or_else(|| translate(event, HERMES_EVENTS, GEMINI_EVENTS))
+        .or_else(|| translate(event, KIRO_EVENTS, GEMINI_EVENTS))
 }
 
 /// Translate an event name to Cursor convention.
@@ -391,6 +440,7 @@ pub fn to_cursor(event: &str) -> Option<String> {
         .or_else(|| translate(event, COPILOT_EVENTS, CURSOR_EVENTS))
         .or_else(|| translate(event, WINDSURF_EVENTS, CURSOR_EVENTS))
         .or_else(|| translate(event, HERMES_EVENTS, CURSOR_EVENTS))
+        .or_else(|| translate(event, KIRO_EVENTS, CURSOR_EVENTS))
 }
 
 /// Translate an event name to Copilot convention.
@@ -401,6 +451,7 @@ pub fn to_copilot(event: &str) -> Option<String> {
         .or_else(|| translate(event, CURSOR_EVENTS, COPILOT_EVENTS))
         .or_else(|| translate(event, WINDSURF_EVENTS, COPILOT_EVENTS))
         .or_else(|| translate(event, HERMES_EVENTS, COPILOT_EVENTS))
+        .or_else(|| translate(event, KIRO_EVENTS, COPILOT_EVENTS))
 }
 
 /// Translate an event name to Windsurf convention.
@@ -411,6 +462,7 @@ pub fn to_windsurf(event: &str) -> Option<String> {
         .or_else(|| translate(event, CURSOR_EVENTS, WINDSURF_EVENTS))
         .or_else(|| translate(event, COPILOT_EVENTS, WINDSURF_EVENTS))
         .or_else(|| translate(event, HERMES_EVENTS, WINDSURF_EVENTS))
+        .or_else(|| translate(event, KIRO_EVENTS, WINDSURF_EVENTS))
 }
 
 /// Translate an event name to Hermes convention.
@@ -421,6 +473,18 @@ pub fn to_hermes(event: &str) -> Option<String> {
         .or_else(|| translate(event, CURSOR_EVENTS, HERMES_EVENTS))
         .or_else(|| translate(event, COPILOT_EVENTS, HERMES_EVENTS))
         .or_else(|| translate(event, WINDSURF_EVENTS, HERMES_EVENTS))
+        .or_else(|| translate(event, KIRO_EVENTS, HERMES_EVENTS))
+}
+
+/// Translate an event name to Kiro IDE convention.
+pub fn to_kiro(event: &str) -> Option<String> {
+    translate(event, KIRO_EVENTS, KIRO_EVENTS)
+        .or_else(|| translate(event, CLAUDE_EVENTS, KIRO_EVENTS))
+        .or_else(|| translate(event, GEMINI_EVENTS, KIRO_EVENTS))
+        .or_else(|| translate(event, CURSOR_EVENTS, KIRO_EVENTS))
+        .or_else(|| translate(event, COPILOT_EVENTS, KIRO_EVENTS))
+        .or_else(|| translate(event, WINDSURF_EVENTS, KIRO_EVENTS))
+        .or_else(|| translate(event, HERMES_EVENTS, KIRO_EVENTS))
 }
 
 #[cfg(test)]
@@ -485,6 +549,15 @@ mod tests {
         assert_eq!(to_windsurf("PreToolUse"), None);
     }
 
+    #[test]
+    fn kiro_events_translate_and_passthrough() {
+        assert_eq!(to_kiro("PostFileSave"), Some("PostFileSave".into()));
+        assert_eq!(to_kiro("PreTaskExec"), Some("PreTaskExec".into()));
+        assert_eq!(to_kiro("BeforeTool"), Some("PreToolUse".into()));
+        assert_eq!(to_claude("PostFileSave"), None);
+        assert_eq!(to_kiro("pre_run_command"), None);
+    }
+
     /// The 10 Windsurf-specific events have no canonical equivalent;
     /// they must passthrough when the target agent is Windsurf itself.
     #[test]
@@ -532,12 +605,7 @@ mod tests {
             assert_eq!(to_claude(event), None, "to_claude leaked for '{}'", event);
             assert_eq!(to_gemini(event), None, "to_gemini leaked for '{}'", event);
             assert_eq!(to_cursor(event), None, "to_cursor leaked for '{}'", event);
-            assert_eq!(
-                to_copilot(event),
-                None,
-                "to_copilot leaked for '{}'",
-                event
-            );
+            assert_eq!(to_copilot(event), None, "to_copilot leaked for '{}'", event);
         }
     }
 
@@ -565,7 +633,10 @@ mod tests {
         // canonical → hermes
         assert_eq!(to_hermes("PreToolUse").as_deref(), Some("pre_tool_call"));
         assert_eq!(to_hermes("PostToolUse").as_deref(), Some("post_tool_call"));
-        assert_eq!(to_hermes("SessionStart").as_deref(), Some("on_session_start"));
+        assert_eq!(
+            to_hermes("SessionStart").as_deref(),
+            Some("on_session_start")
+        );
         assert_eq!(to_hermes("SubagentStop").as_deref(), Some("subagent_stop"));
         // hermes native passthrough
         assert_eq!(to_hermes("pre_tool_call").as_deref(), Some("pre_tool_call"));

@@ -311,8 +311,9 @@ fn modify_hermes_yaml(
     let mut doc: serde_yaml::Value = if existing.trim().is_empty() {
         serde_yaml::Value::Mapping(serde_yaml::Mapping::new())
     } else {
-        serde_yaml::from_str(&existing)
-            .map_err(|e| HkError::ConfigCorrupted(format!("Failed to parse Hermes config.yaml: {e}")))?
+        serde_yaml::from_str(&existing).map_err(|e| {
+            HkError::ConfigCorrupted(format!("Failed to parse Hermes config.yaml: {e}"))
+        })?
     };
     let root = doc
         .as_mapping_mut()
@@ -345,8 +346,12 @@ fn deploy_mcp_server_hermes_yaml(
         } else {
             server.insert("command".into(), entry.command.clone().into());
             if !entry.args.is_empty() {
-                let args: Vec<serde_yaml::Value> =
-                    entry.args.iter().cloned().map(serde_yaml::Value::String).collect();
+                let args: Vec<serde_yaml::Value> = entry
+                    .args
+                    .iter()
+                    .cloned()
+                    .map(serde_yaml::Value::String)
+                    .collect();
                 server.insert("args".into(), serde_yaml::Value::Sequence(args));
             }
             if !entry.env.is_empty() {
@@ -358,7 +363,10 @@ fn deploy_mcp_server_hermes_yaml(
             }
         }
         server.insert("enabled".into(), serde_yaml::Value::Bool(true));
-        servers.insert(entry.name.clone().into(), serde_yaml::Value::Mapping(server));
+        servers.insert(
+            entry.name.clone().into(),
+            serde_yaml::Value::Mapping(server),
+        );
         Ok(())
     })
 }
@@ -419,6 +427,64 @@ pub fn set_hermes_mcp_enabled(
         server.insert("enabled".into(), serde_yaml::Value::Bool(enabled));
         Ok(())
     })
+}
+
+/// Flip a Kiro MCP server's native `disabled` flag in place.
+pub fn set_kiro_mcp_enabled(
+    config_path: &Path,
+    server_name: &str,
+    enabled: bool,
+) -> Result<(), HkError> {
+    locked_modify_json(config_path, |config| {
+        let servers = config
+            .get_mut("mcpServers")
+            .and_then(|v| v.as_object_mut())
+            .ok_or_else(|| HkError::NotFound("No mcpServers block found".into()))?;
+        let server = servers
+            .get_mut(server_name)
+            .and_then(|v| v.as_object_mut())
+            .ok_or_else(|| HkError::NotFound(format!("MCP server '{server_name}' not found")))?;
+        if enabled {
+            server.remove("disabled");
+        } else {
+            server.insert("disabled".into(), serde_json::Value::Bool(true));
+        }
+        Ok(())
+    })
+}
+
+fn kiro_hook_matches(
+    hook: &serde_json::Value,
+    event: &str,
+    matcher: Option<&str>,
+    command: &str,
+) -> bool {
+    hook.get("trigger").and_then(|v| v.as_str()) == Some(event)
+        && hook.get("matcher").and_then(|v| v.as_str()) == matcher
+        && hook
+            .get("action")
+            .and_then(|v| v.get("type"))
+            .and_then(|v| v.as_str())
+            == Some("command")
+        && hook
+            .get("action")
+            .and_then(|v| v.get("command"))
+            .and_then(|v| v.as_str())
+            == Some(command)
+}
+
+fn kiro_hook_value(entry: &HookEntry) -> serde_json::Value {
+    let mut hook = serde_json::json!({
+        "name": format!("{} {}", entry.event, entry.command),
+        "trigger": entry.event,
+        "action": { "type": "command", "command": entry.command },
+    });
+    if let Some(matcher) = &entry.matcher
+        && let Some(obj) = hook.as_object_mut()
+    {
+        obj.insert("matcher".into(), serde_json::Value::String(matcher.clone()));
+    }
+    hook
 }
 
 /// True if a hooks-list item matches (matcher, command).
@@ -526,8 +592,9 @@ fn read_hook_config_hermes_yaml(
         return Ok(None);
     }
     let content = std::fs::read_to_string(config_path)?;
-    let doc: serde_yaml::Value = serde_yaml::from_str(&content)
-        .map_err(|e| HkError::ConfigCorrupted(format!("Failed to parse Hermes config.yaml: {e}")))?;
+    let doc: serde_yaml::Value = serde_yaml::from_str(&content).map_err(|e| {
+        HkError::ConfigCorrupted(format!("Failed to parse Hermes config.yaml: {e}"))
+    })?;
     let Some(item) = doc
         .get("hooks")
         .and_then(|h| h.get(event))
@@ -540,8 +607,7 @@ fn read_hook_config_hermes_yaml(
         return Ok(None);
     };
     let json_str = serde_json::to_string(item).map_err(|e| HkError::Internal(e.to_string()))?;
-    let json_val =
-        serde_json::from_str(&json_str).map_err(|e| HkError::Internal(e.to_string()))?;
+    let json_val = serde_json::from_str(&json_str).map_err(|e| HkError::Internal(e.to_string()))?;
     Ok(Some(json_val))
 }
 
@@ -699,6 +765,26 @@ pub fn deploy_hook(
             HookFormat::HermesYaml => {
                 // Handled by the early return above; YAML is not JSON.
                 unreachable!("HermesYaml handled before locked_modify_json")
+            }
+            HookFormat::KiroIde => {
+                config
+                    .as_object_mut()
+                    .ok_or_else(|| HkError::ConfigCorrupted("Config is not an object".into()))?
+                    .entry("version")
+                    .or_insert(serde_json::json!("1"));
+                let hooks = config
+                    .as_object_mut()
+                    .unwrap()
+                    .entry("hooks")
+                    .or_insert_with(|| serde_json::json!([]));
+                let arr = hooks
+                    .as_array_mut()
+                    .ok_or_else(|| HkError::ConfigCorrupted("hooks is not an array".into()))?;
+                if !arr.iter().any(|h| {
+                    kiro_hook_matches(h, &entry.event, entry.matcher.as_deref(), &entry.command)
+                }) {
+                    arr.push(kiro_hook_value(entry));
+                }
             }
             HookFormat::None => {
                 return Err(HkError::Internal("Agent does not support hooks".into()));
@@ -858,6 +944,11 @@ pub fn remove_hook(
             HookFormat::HermesYaml => {
                 // Handled by the early return above; YAML is not JSON.
                 unreachable!("HermesYaml handled before locked_modify_json")
+            }
+            HookFormat::KiroIde => {
+                if let Some(hooks) = config.get_mut("hooks").and_then(|v| v.as_array_mut()) {
+                    hooks.retain(|h| !kiro_hook_matches(h, event, matcher, command));
+                }
             }
             HookFormat::None => {
                 return Err(HkError::Internal("Agent does not support hooks".into()));
@@ -1038,6 +1129,22 @@ pub fn restore_hook(
             HookFormat::HermesYaml => {
                 // Handled by the early return above; YAML is not JSON.
                 unreachable!("HermesYaml handled before locked_modify_json")
+            }
+            HookFormat::KiroIde => {
+                config
+                    .as_object_mut()
+                    .ok_or_else(|| HkError::ConfigCorrupted("Config is not an object".into()))?
+                    .entry("version")
+                    .or_insert(serde_json::json!("1"));
+                let hooks = config
+                    .as_object_mut()
+                    .unwrap()
+                    .entry("hooks")
+                    .or_insert_with(|| serde_json::json!([]));
+                let arr = hooks
+                    .as_array_mut()
+                    .ok_or_else(|| HkError::ConfigCorrupted("hooks is not an array".into()))?;
+                arr.push(entry.clone());
             }
             HookFormat::None => {
                 return Err(HkError::Internal("Agent does not support hooks".into()));
@@ -1473,6 +1580,15 @@ pub fn read_hook_config(
         return Ok(None);
     }
     let config = read_or_create_json(config_path)?;
+    if format == HookFormat::KiroIde {
+        let Some(hooks) = config.get("hooks").and_then(|v| v.as_array()) else {
+            return Ok(None);
+        };
+        return Ok(hooks
+            .iter()
+            .find(|entry| kiro_hook_matches(entry, event, matcher, command))
+            .cloned());
+    }
     let hooks = config.get("hooks").and_then(|v| v.as_object());
     let Some(hooks) = hooks else {
         return Ok(None);
@@ -1526,6 +1642,7 @@ pub fn read_hook_config(
             }
             Ok(None)
         }
+        HookFormat::KiroIde => Ok(None),
         // Handled by the early return above; YAML is not JSON.
         HookFormat::HermesYaml => Ok(None),
         HookFormat::None => Ok(None),
@@ -2692,6 +2809,72 @@ mod tests {
     }
 
     #[test]
+    fn test_kiro_ide_hook_roundtrip() {
+        let dir = TempDir::new().unwrap();
+        let config = dir.path().join("lint.json");
+        let entry = HookEntry {
+            event: "PostFileSave".into(),
+            matcher: Some("\\.ts$".into()),
+            command: "npm run lint".into(),
+        };
+        deploy_hook(&config, &entry, HookFormat::KiroIde).unwrap();
+        let saved = read_hook_config(
+            &config,
+            "PostFileSave",
+            Some("\\.ts$"),
+            "npm run lint",
+            HookFormat::KiroIde,
+        )
+        .unwrap()
+        .expect("Kiro hook should be readable");
+        assert_eq!(saved["action"]["type"], "command");
+        assert_eq!(saved["action"]["command"], "npm run lint");
+
+        remove_hook(
+            &config,
+            "PostFileSave",
+            Some("\\.ts$"),
+            "npm run lint",
+            HookFormat::KiroIde,
+        )
+        .unwrap();
+        let removed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+        assert_eq!(removed["hooks"].as_array().unwrap().len(), 0);
+
+        restore_hook(&config, "PostFileSave", &saved, HookFormat::KiroIde).unwrap();
+        let restored = read_hook_config(
+            &config,
+            "PostFileSave",
+            Some("\\.ts$"),
+            "npm run lint",
+            HookFormat::KiroIde,
+        )
+        .unwrap();
+        assert!(restored.is_some());
+    }
+
+    #[test]
+    fn test_set_kiro_mcp_enabled_flips_disabled() {
+        let dir = TempDir::new().unwrap();
+        let config = dir.path().join("mcp.json");
+        std::fs::write(
+            &config,
+            r#"{"mcpServers":{"github":{"command":"npx","args":["server"]}}}"#,
+        )
+        .unwrap();
+        set_kiro_mcp_enabled(&config, "github", false).unwrap();
+        let disabled: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+        assert_eq!(disabled["mcpServers"]["github"]["disabled"], true);
+
+        set_kiro_mcp_enabled(&config, "github", true).unwrap();
+        let enabled: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+        assert!(enabled["mcpServers"]["github"].get("disabled").is_none());
+    }
+
+    #[test]
     fn test_remove_hook_cursor_format() {
         let dir = TempDir::new().unwrap();
         let config = dir.path().join("hooks.json");
@@ -2804,7 +2987,13 @@ mod tests {
                 .and_then(|h| h.get("pre_tool_call"))
                 .is_none()
         );
-        restore_hook(&cfg, "pre_tool_call", &saved.unwrap(), HookFormat::HermesYaml).unwrap();
+        restore_hook(
+            &cfg,
+            "pre_tool_call",
+            &saved.unwrap(),
+            HookFormat::HermesYaml,
+        )
+        .unwrap();
         let restored = read_hook_config(
             &cfg,
             "pre_tool_call",
@@ -2887,14 +3076,24 @@ mod tests {
         let cfg = tmp.path().join("config.yaml");
         std::fs::write(&cfg, "plugins:\n  enabled:\n    - calculator\n").unwrap();
         set_hermes_plugin_enabled(&cfg, "weather", true).unwrap();
-        let doc: serde_yaml::Value = serde_yaml::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
-        let list: Vec<&str> = doc["plugins"]["enabled"].as_sequence().unwrap()
-            .iter().filter_map(|v| v.as_str()).collect();
+        let doc: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
+        let list: Vec<&str> = doc["plugins"]["enabled"]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
         assert!(list.contains(&"calculator") && list.contains(&"weather"));
         set_hermes_plugin_enabled(&cfg, "calculator", false).unwrap();
-        let doc2: serde_yaml::Value = serde_yaml::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
-        let list2: Vec<&str> = doc2["plugins"]["enabled"].as_sequence().unwrap()
-            .iter().filter_map(|v| v.as_str()).collect();
+        let doc2: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
+        let list2: Vec<&str> = doc2["plugins"]["enabled"]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
         assert!(!list2.contains(&"calculator") && list2.contains(&"weather"));
     }
 
@@ -2926,7 +3125,11 @@ mod tests {
             .iter()
             .filter_map(|v| v.as_str())
             .collect();
-        assert_eq!(list2, vec!["calculator"], "disabling absent plugin is a no-op");
+        assert_eq!(
+            list2,
+            vec!["calculator"],
+            "disabling absent plugin is a no-op"
+        );
     }
 
     #[test]
@@ -2942,23 +3145,41 @@ mod tests {
         set_hermes_mcp_enabled(&cfg, "github", false).unwrap();
         let doc: serde_yaml::Value =
             serde_yaml::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
-        let gh = doc.get("mcp_servers").and_then(|m| m.get("github")).unwrap();
+        let gh = doc
+            .get("mcp_servers")
+            .and_then(|m| m.get("github"))
+            .unwrap();
         assert_eq!(gh.get("enabled").and_then(|v| v.as_bool()), Some(false));
-        assert_eq!(gh.get("env").and_then(|e| e.get("TOKEN")).and_then(|v| v.as_str()), Some("secret123"));
-        let include: Vec<&str> = gh["tools"]["include"].as_sequence().unwrap()
-            .iter().filter_map(|v| v.as_str()).collect();
+        assert_eq!(
+            gh.get("env")
+                .and_then(|e| e.get("TOKEN"))
+                .and_then(|v| v.as_str()),
+            Some("secret123")
+        );
+        let include: Vec<&str> = gh["tools"]["include"]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
         assert_eq!(include, vec!["a", "b"]);
         assert!(doc.get("mcp_servers").and_then(|m| m.get("time")).is_some());
         // re-enable
         set_hermes_mcp_enabled(&cfg, "github", true).unwrap();
         let doc2: serde_yaml::Value =
             serde_yaml::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
-        assert_eq!(doc2["mcp_servers"]["github"]["enabled"].as_bool(), Some(true));
+        assert_eq!(
+            doc2["mcp_servers"]["github"]["enabled"].as_bool(),
+            Some(true)
+        );
         // `time` has no `enabled` key on disk; disabling must INSERT enabled:false.
         set_hermes_mcp_enabled(&cfg, "time", false).unwrap();
         let doc3: serde_yaml::Value =
             serde_yaml::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
-        assert_eq!(doc3["mcp_servers"]["time"]["enabled"].as_bool(), Some(false));
+        assert_eq!(
+            doc3["mcp_servers"]["time"]["enabled"].as_bool(),
+            Some(false)
+        );
         // and `time` keeps its command (entry not rebuilt)
         assert_eq!(doc3["mcp_servers"]["time"]["command"].as_str(), Some("uvx"));
     }

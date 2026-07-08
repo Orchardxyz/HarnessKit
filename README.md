@@ -67,6 +67,7 @@ HarnessKit manages **all five extension types** from a unified interface — **S
 | **Windsurf** | ✓ | ✓ | — | ✓ | ✓ |
 | **OpenCode** | ✓ | ✓ | ✓ | — | ✓ |
 | **Hermes** | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **Kiro** | ✓ | ✓ | — | ✓ | ✓ |
 
 <small><i>* "—" indicates the agent currently does not support this extension type.</i></small>
 
@@ -86,7 +87,7 @@ HarnessKit manages **all five extension types** from a unified interface — **S
 
 ### 🤖 Agent Configs, Memory & Rules
 
-HarnessKit manages every agent's **Configs**, **Memory**, **Rules**, **Subagents**, and **Ignore** files from one place. Currently supporting **9 agents**: **Claude Code**, **Codex**, **Gemini CLI**, **Cursor**, **Antigravity**, **Copilot**, **Windsurf**, **OpenCode**, and **Hermes**.
+HarnessKit manages every agent's **Configs**, **Memory**, **Rules**, **Subagents**, and **Ignore** files from one place. Currently supporting **10 agents**: **Claude Code**, **Codex**, **Gemini CLI**, **Cursor**, **Antigravity**, **Copilot**, **Windsurf**, **OpenCode**, **Hermes**, and **Kiro**.
 
 - **Config file tracking** — Automatically discovers every agent's config files — both global and per-project. Add your project directories or custom paths and HarnessKit picks them up alongside the global ones.
 - **Per-agent dashboard** — Each agent gets its own page with all files organized by category, showing scope, path, file size, and a summary of installed extensions. Expand any file to preview its content right in the app.
@@ -174,7 +175,7 @@ HarnessKit ships a standalone command-line interface (`hk`) for terminal-first w
 
 ```shell
 $ hk status
-  Agents        9 detected (claude · codex · gemini · cursor · antigravity · copilot · windsurf · opencode · hermes)
+  Agents        10 detected (claude · codex · gemini · cursor · antigravity · copilot · windsurf · opencode · hermes · kiro)
   Extensions    136 total (124 skills · 2 mcp · 8 plugins · 1 hooks · 1 clis)
 
 $ hk list --kind skill --agent claude    # filter by type and agent
@@ -366,7 +367,7 @@ See [CLI Support](#%EF%B8%8F-cli-support) above for the full list of commands.
 
 ## Roadmap
 
-- 🤖 **More Agents** — Hermes-agent, OpenClaw, and more
+- 🤖 **More Agents** — OpenClaw and more
 - ⌨️ **CLI Enhancements** — More commands and richer functionality for `hk`
 
 ---

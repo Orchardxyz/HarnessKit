@@ -2,11 +2,9 @@ use crate::{
     HkError,
     adapter::AgentAdapter,
     auditor::{AuditInput, Auditor},
-    deployer,
-    manager,
+    deployer, manager,
     models::*,
-    scanner,
-    skills_cli,
+    scanner, skills_cli,
     store::Store,
 };
 use parking_lot::Mutex;
@@ -160,12 +158,8 @@ pub fn post_install_sync(
                     extensions.extend(exts);
                 }
             }
-            let sibling_id = scanner::stable_id_with_scope_for(
-                skill_name,
-                "skill",
-                &sibling_name,
-                target_scope,
-            );
+            let sibling_id =
+                scanner::stable_id_with_scope_for(skill_name, "skill", &sibling_name, target_scope);
             let _ = store.set_install_meta(&sibling_id, meta);
             if let Some(p) = pack {
                 let _ = store.update_pack(&sibling_id, Some(p));
@@ -212,10 +206,7 @@ pub fn is_externally_managed(ext: &Extension) -> bool {
 /// rescan reflect the change — and `Ok(false)` when the extension isn't externally
 /// managed OR the CLI is unavailable, in which case the caller does its own
 /// update. Errors from a CLI that ran but failed propagate.
-pub fn try_delegate_skill_update(
-    store: &Mutex<Store>,
-    ext: &Extension,
-) -> Result<bool, HkError> {
+pub fn try_delegate_skill_update(store: &Mutex<Store>, ext: &Extension) -> Result<bool, HkError> {
     if !is_externally_managed(ext) {
         return Ok(false);
     }
@@ -227,7 +218,12 @@ pub fn try_delegate_skill_update(
     // rescan would leave install_revision NULL and the row stuck on "update
     // available". Record the upstream HEAD now (best-effort — the update already
     // succeeded) so the check sees "up to date", mirroring the native path.
-    if let Some(url) = ext.install_meta.as_ref().and_then(|m| m.url.clone()).or_else(|| ext.source.url.clone()) {
+    if let Some(url) = ext
+        .install_meta
+        .as_ref()
+        .and_then(|m| m.url.clone())
+        .or_else(|| ext.source.url.clone())
+    {
         match manager::get_remote_head(&url) {
             Ok(rev) => record_skill_revision(store, ext, &rev)?,
             Err(e) => eprintln!("[hk] delegated update: could not record revision: {e}"),
@@ -240,7 +236,11 @@ pub fn try_delegate_skill_update(
 /// skill row, so the git-based update check sees the skill as up to date after an
 /// external (`skills` CLI) update. Mirrors how the native clone+deploy path
 /// records the captured revision across sibling copies.
-fn record_skill_revision(store: &Mutex<Store>, ext: &Extension, revision: &str) -> Result<(), HkError> {
+fn record_skill_revision(
+    store: &Mutex<Store>,
+    ext: &Extension,
+    revision: &str,
+) -> Result<(), HkError> {
     let store = store.lock();
     let base = ext.install_meta.clone().unwrap_or_else(|| InstallMeta {
         install_type: "git".into(),
@@ -263,7 +263,9 @@ fn record_skill_revision(store: &Mutex<Store>, ext: &Extension, revision: &str) 
     let siblings: Vec<Extension> = store
         .list_extensions(Some(ext.kind), None)?
         .into_iter()
-        .filter(|e| e.name == ext.name && e.source_path.is_some() && same_scope(&e.scope, &ext.scope))
+        .filter(|e| {
+            e.name == ext.name && e.source_path.is_some() && same_scope(&e.scope, &ext.scope)
+        })
         .collect();
     for sib in &siblings {
         if let Err(e) = store.set_install_meta(&sib.id, &updated) {
@@ -385,9 +387,7 @@ pub fn bind_pack(store: &Store, ids: &[String], pack: Option<&str>) -> Result<()
     // Normalize first so URLs/SSH paths get reduced to owner/repo before we
     // touch the DB. Frontend also normalizes; this is defense-in-depth for
     // any non-UI caller (CLI, future API client).
-    let trimmed: Option<String> = pack
-        .map(normalize_pack)
-        .filter(|s| !s.is_empty());
+    let trimmed: Option<String> = pack.map(normalize_pack).filter(|s| !s.is_empty());
 
     // Phase 1: always persist the pack column update so the user's typing
     // is preserved even when we can't synthesize meta (invalid format).
@@ -901,30 +901,34 @@ pub fn delete_extension(
                 if !ext.agents.contains(&adapter.name().to_string()) {
                     continue;
                 }
-                let Some(config_path) = adapter.hook_config_path_for(&ext.scope) else {
-                    continue;
-                };
-                for hook in adapter.read_hooks_from(&config_path) {
-                    let hook_name = format!(
-                        "{}:{}:{}",
-                        hook.event,
-                        hook.matcher.as_deref().unwrap_or("*"),
-                        hook.command
-                    );
-                    let candidate = scanner::stable_id_with_scope_for(
-                        &hook_name,
-                        "hook",
-                        adapter.name(),
-                        &ext.scope,
-                    );
-                    if candidate == id {
-                        deployer::remove_hook(
-                            &config_path,
-                            &hook.event,
-                            hook.matcher.as_deref(),
-                            &hook.command,
-                            adapter.hook_format(),
-                        )?;
+                let config_paths: Vec<std::path::PathBuf> = ext
+                    .source_path
+                    .as_ref()
+                    .map(|p| vec![std::path::PathBuf::from(p)])
+                    .unwrap_or_else(|| adapter.hook_config_paths_for(&ext.scope));
+                for config_path in config_paths {
+                    for hook in adapter.read_hooks_from(&config_path) {
+                        let hook_name = format!(
+                            "{}:{}:{}",
+                            hook.event,
+                            hook.matcher.as_deref().unwrap_or("*"),
+                            hook.command
+                        );
+                        let candidate = scanner::stable_id_with_scope_for(
+                            &hook_name,
+                            "hook",
+                            adapter.name(),
+                            &ext.scope,
+                        );
+                        if candidate == id {
+                            deployer::remove_hook(
+                                &config_path,
+                                &hook.event,
+                                hook.matcher.as_deref(),
+                                &hook.command,
+                                adapter.hook_format(),
+                            )?;
+                        }
                     }
                 }
             }
@@ -1275,9 +1279,7 @@ pub fn install_to_agent(
             // `skill_dir_for_category` returns None for flat-layout agents, so
             // non-Hermes targets fall through to their default skill dir.
             let target_dir = hermes_category
-                .and_then(|cat| {
-                    target_adapter.skill_dir_for_category(&ConfigScope::Global, cat)
-                })
+                .and_then(|cat| target_adapter.skill_dir_for_category(&ConfigScope::Global, cat))
                 .or_else(|| target_adapter.skill_dirs().into_iter().next())
                 .ok_or_else(|| {
                     HkError::Internal(format!("No skill directory for agent '{}'", target_agent))
@@ -1346,29 +1348,33 @@ pub fn install_to_agent(
                 if !ext.agents.contains(&adapter.name().to_string()) {
                     continue;
                 }
-                let Some(source_path) = adapter.hook_config_path_for(&ext.scope) else {
-                    continue;
-                };
-                for hook in adapter.read_hooks_from(&source_path) {
-                    let hook_name = format!(
-                        "{}:{}:{}",
-                        hook.event,
-                        hook.matcher.as_deref().unwrap_or("*"),
-                        hook.command
-                    );
-                    let candidate = scanner::stable_id_with_scope_for(
-                        &hook_name,
-                        "hook",
-                        adapter.name(),
-                        &ext.scope,
-                    );
-                    if candidate == extension_id {
-                        source_entry = Some(hook);
+                let config_paths: Vec<std::path::PathBuf> = ext
+                    .source_path
+                    .as_ref()
+                    .map(|p| vec![std::path::PathBuf::from(p)])
+                    .unwrap_or_else(|| adapter.hook_config_paths_for(&ext.scope));
+                for source_path in config_paths {
+                    for hook in adapter.read_hooks_from(&source_path) {
+                        let hook_name = format!(
+                            "{}:{}:{}",
+                            hook.event,
+                            hook.matcher.as_deref().unwrap_or("*"),
+                            hook.command
+                        );
+                        let candidate = scanner::stable_id_with_scope_for(
+                            &hook_name,
+                            "hook",
+                            adapter.name(),
+                            &ext.scope,
+                        );
+                        if candidate == extension_id {
+                            source_entry = Some(hook);
+                            break;
+                        }
+                    }
+                    if source_entry.is_some() {
                         break;
                     }
-                }
-                if source_entry.is_some() {
-                    break;
                 }
             }
             let mut entry = source_entry
@@ -1651,8 +1657,7 @@ mod tests {
         let antigravity_parent = tmp.path().join("gemini/antigravity");
         std::fs::create_dir_all(&antigravity_parent).unwrap();
         let antigravity_skills = antigravity_parent.join("skills");
-        std::os::unix::fs::symlink(tmp.path().join("claude/skills"), &antigravity_skills)
-            .unwrap();
+        std::os::unix::fs::symlink(tmp.path().join("claude/skills"), &antigravity_skills).unwrap();
         let antigravity_md = antigravity_skills.join("code-review/SKILL.md");
         // Symlinked path should resolve to the same inode as claude_md.
         assert_eq!(
@@ -2188,7 +2193,9 @@ mod tests {
 
         let adapters: Vec<Box<dyn adapter::AgentAdapter>> = vec![
             Box::new(adapter::codex::CodexAdapter::with_home(home.to_path_buf())),
-            Box::new(adapter::gemini::GeminiAdapter::with_home(home.to_path_buf())),
+            Box::new(adapter::gemini::GeminiAdapter::with_home(
+                home.to_path_buf(),
+            )),
         ];
 
         let install_meta = InstallMeta {
@@ -2308,7 +2315,10 @@ mod tests {
         // Validator will reject these — normalize just passes them through
         // (trimmed) so the validator's error path stays the source of truth.
         assert_eq!(normalize_pack("not-a-pack"), "not-a-pack");
-        assert_eq!(normalize_pack("https://example.com/foo/bar"), "https://example.com/foo/bar");
+        assert_eq!(
+            normalize_pack("https://example.com/foo/bar"),
+            "https://example.com/foo/bar"
+        );
     }
 
     #[test]
@@ -2393,10 +2403,7 @@ mod tests {
             .install_meta
             .unwrap();
         assert_eq!(meta.install_type, INSTALL_TYPE_MANUAL);
-        assert_eq!(
-            meta.url.as_deref(),
-            Some("https://github.com/new/repo.git")
-        );
+        assert_eq!(meta.url.as_deref(), Some("https://github.com/new/repo.git"));
     }
 
     #[test]
@@ -2593,10 +2600,9 @@ mod tests {
         let store_raw = Store::open(&home.join("test.db")).unwrap();
         let store = Mutex::new(store_raw);
 
-        let adapters: Vec<Box<dyn adapter::AgentAdapter>> =
-            vec![Box::new(adapter::hermes::HermesAdapter::with_home(
-                home.to_path_buf(),
-            ))];
+        let adapters: Vec<Box<dyn adapter::AgentAdapter>> = vec![Box::new(
+            adapter::hermes::HermesAdapter::with_home(home.to_path_buf()),
+        )];
 
         // Scan + sync so the plugin extension lands in the store with an id.
         let exts = scanner::scan_all(&adapters, &[]);

@@ -390,49 +390,55 @@ pub fn scan_mcp_servers(adapter: &dyn AgentAdapter) -> Vec<Extension> {
 
 /// Scan hooks from an agent adapter
 pub fn scan_hooks(adapter: &dyn AgentAdapter) -> Vec<Extension> {
-    let config_path = adapter.hook_config_path();
-    let config_created = file_created_time(&config_path);
-    let config_modified = file_modified_time(&config_path);
-
+    let scope = ConfigScope::Global;
     adapter
-        .read_hooks()
+        .hook_config_paths_for(&scope)
         .into_iter()
-        .map(|hook| {
-            let hook_name = format!(
-                "{}:{}:{}",
-                hook.event,
-                hook.matcher.as_deref().unwrap_or("*"),
-                hook.command
-            );
-            let description = format!("Runs `{}` on {} event", hook.command, hook.event);
+        .flat_map(|config_path| {
+            let config_created = file_created_time(&config_path);
+            let config_modified = file_modified_time(&config_path);
+            let config_path_str = config_path.to_string_lossy().to_string();
+            let agent_name = adapter.name().to_string();
+            adapter
+                .read_hooks_from(&config_path)
+                .into_iter()
+                .map(move |hook| {
+                    let hook_name = format!(
+                        "{}:{}:{}",
+                        hook.event,
+                        hook.matcher.as_deref().unwrap_or("*"),
+                        hook.command
+                    );
+                    let description = format!("Runs `{}` on {} event", hook.command, hook.event);
 
-            Extension {
-                id: stable_id(&hook_name, "hook", adapter.name()),
-                kind: ExtensionKind::Hook,
-                name: hook_name,
-                description,
-                source: Source {
-                    origin: SourceOrigin::Agent,
-                    url: None,
-                    version: None,
-                    commit_hash: None,
-                    from_manifest: false,
-                },
-                agents: vec![adapter.name().to_string()],
-                tags: vec![],
-                pack: None,
-                permissions: infer_hook_permissions(&hook.command),
-                enabled: true,
-                trust_score: None,
-                installed_at: config_created,
-                updated_at: config_modified,
+                    Extension {
+                        id: stable_id(&hook_name, "hook", &agent_name),
+                        kind: ExtensionKind::Hook,
+                        name: hook_name,
+                        description,
+                        source: Source {
+                            origin: SourceOrigin::Agent,
+                            url: None,
+                            version: None,
+                            commit_hash: None,
+                            from_manifest: false,
+                        },
+                        agents: vec![agent_name.clone()],
+                        tags: vec![],
+                        pack: None,
+                        permissions: infer_hook_permissions(&hook.command),
+                        enabled: true,
+                        trust_score: None,
+                        installed_at: config_created,
+                        updated_at: config_modified,
 
-                source_path: None,
-                cli_parent_id: None,
-                cli_meta: None,
-                install_meta: None,
-                scope: ConfigScope::Global,
-            }
+                        source_path: Some(config_path_str.clone()),
+                        cli_parent_id: None,
+                        cli_meta: None,
+                        install_meta: None,
+                        scope: ConfigScope::Global,
+                    }
+                })
         })
         .collect()
 }
@@ -1048,8 +1054,7 @@ pub fn scan_project_extensions(
     }
 
     // --- Project-scoped hooks ---
-    if let Some(rel) = adapter.project_hook_config_relpath() {
-        let hook_path = project_path.join(&rel);
+    for hook_path in adapter.hook_config_paths_for(&scope) {
         if hook_path.is_file() {
             let hook_path_str = hook_path.to_string_lossy().to_string();
             let config_created = file_created_time(&hook_path);
@@ -1995,7 +2000,11 @@ pub fn scan_agent_configs(
     for (owner_cwd, files) in adapter.external_project_memory() {
         let scope = owner_cwd
             .as_ref()
-            .and_then(|cwd| projects.iter().find(|(_, path)| Path::new(path) == cwd.as_path()))
+            .and_then(|cwd| {
+                projects
+                    .iter()
+                    .find(|(_, path)| Path::new(path) == cwd.as_path())
+            })
             .map(|(name, path)| ConfigScope::Project {
                 name: name.clone(),
                 path: path.clone(),
@@ -2272,7 +2281,10 @@ mod tests {
         let exts = scan_plugins(&adapter);
         let p = exts.iter().find(|e| e.name == "code-review").unwrap();
         assert_eq!(p.source.origin, SourceOrigin::Git);
-        assert_eq!(p.pack.as_deref(), Some("anthropics/claude-plugins-official"));
+        assert_eq!(
+            p.pack.as_deref(),
+            Some("anthropics/claude-plugins-official")
+        );
     }
 
     #[test]
