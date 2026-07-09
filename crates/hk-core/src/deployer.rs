@@ -1144,7 +1144,20 @@ pub fn restore_hook(
                 let arr = hooks
                     .as_array_mut()
                     .ok_or_else(|| HkError::ConfigCorrupted("hooks is not an array".into()))?;
-                arr.push(entry.clone());
+                // Same (event, matcher, command) identity as deploy_hook, so a
+                // double-restore doesn't duplicate the entry.
+                let matcher = entry.get("matcher").and_then(|v| v.as_str());
+                let command = entry
+                    .get("action")
+                    .and_then(|a| a.get("command"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default();
+                if !arr
+                    .iter()
+                    .any(|h| kiro_hook_matches(h, event, matcher, command))
+                {
+                    arr.push(entry.clone());
+                }
             }
             HookFormat::None => {
                 return Err(HkError::Internal("Agent does not support hooks".into()));
@@ -2857,6 +2870,27 @@ mod tests {
         )
         .unwrap();
         assert!(restored.is_some());
+    }
+
+    #[test]
+    fn test_kiro_ide_restore_hook_is_idempotent() {
+        let dir = TempDir::new().unwrap();
+        let config = dir.path().join("lint.json");
+        let entry = serde_json::json!({
+            "name": "lint-on-save",
+            "trigger": "PostFileSave",
+            "matcher": "\\.ts$",
+            "action": { "type": "command", "command": "npm run lint" },
+        });
+        restore_hook(&config, "PostFileSave", &entry, HookFormat::KiroIde).unwrap();
+        restore_hook(&config, "PostFileSave", &entry, HookFormat::KiroIde).unwrap();
+        let content: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+        assert_eq!(
+            content["hooks"].as_array().unwrap().len(),
+            1,
+            "double restore must not duplicate the hook"
+        );
     }
 
     #[test]
