@@ -263,7 +263,7 @@ mod tests {
         std::fs::write(
             hooks_dir.join("lint.json"),
             r#"{
-              "version": "1",
+              "version": "v1",
               "hooks": [
                 {
                   "name": "lint-on-save",

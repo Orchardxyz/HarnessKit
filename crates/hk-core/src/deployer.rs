@@ -771,7 +771,7 @@ pub fn deploy_hook(
                     .as_object_mut()
                     .ok_or_else(|| HkError::ConfigCorrupted("Config is not an object".into()))?
                     .entry("version")
-                    .or_insert(serde_json::json!("1"));
+                    .or_insert(serde_json::json!("v1"));
                 let hooks = config
                     .as_object_mut()
                     .unwrap()
@@ -1135,7 +1135,7 @@ pub fn restore_hook(
                     .as_object_mut()
                     .ok_or_else(|| HkError::ConfigCorrupted("Config is not an object".into()))?
                     .entry("version")
-                    .or_insert(serde_json::json!("1"));
+                    .or_insert(serde_json::json!("v1"));
                 let hooks = config
                     .as_object_mut()
                     .unwrap()
@@ -2818,6 +2818,11 @@ mod tests {
             command: "npm run lint".into(),
         };
         deploy_hook(&config, &entry, HookFormat::KiroIde).unwrap();
+        let deployed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+        // Kiro only documents "v1" (https://kiro.dev/docs/hooks/); other values
+        // may make Kiro skip the file entirely.
+        assert_eq!(deployed["version"], "v1");
         let saved = read_hook_config(
             &config,
             "PostFileSave",
