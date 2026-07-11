@@ -192,7 +192,13 @@ impl AgentAdapter for KiroAdapter {
     }
 
     fn global_subagent_files(&self) -> Vec<PathBuf> {
-        Self::json_files(&self.base_dir().join("agents"))
+        // Two coexisting formats in the same dir: Kiro CLI agents are *.json,
+        // IDE custom subagents are *.md with YAML front matter
+        // (https://kiro.dev/docs/chat/subagents/).
+        let agents_dir = self.base_dir().join("agents");
+        let mut files = Self::json_files(&agents_dir);
+        files.extend(super::files_with_ext(&agents_dir, "md"));
+        files
     }
 
     fn project_markers(&self) -> Vec<ProjectMarker> {
@@ -211,7 +217,7 @@ impl AgentAdapter for KiroAdapter {
     }
 
     fn project_subagent_patterns(&self) -> Vec<String> {
-        vec![".kiro/agents/*.json".into()]
+        vec![".kiro/agents/*.json".into(), ".kiro/agents/*.md".into()]
     }
 
     fn project_skill_dirs(&self) -> Vec<String> {
@@ -296,6 +302,33 @@ mod tests {
         assert!(
             !hooks[0].enabled,
             "natively disabled hook must be listed as disabled, not dropped"
+        );
+    }
+
+    #[test]
+    fn subagents_cover_cli_json_and_ide_markdown() {
+        let tmp = tempfile::tempdir().unwrap();
+        let adapter = KiroAdapter::with_home(tmp.path().to_path_buf());
+        let agents_dir = tmp.path().join(".kiro/agents");
+        std::fs::create_dir_all(&agents_dir).unwrap();
+        std::fs::write(agents_dir.join("cli-agent.json"), r#"{"name":"cli"}"#).unwrap();
+        std::fs::write(
+            agents_dir.join("reviewer.md"),
+            "---\nname: reviewer\n---\nYou are a code reviewer.\n",
+        )
+        .unwrap();
+
+        let files = adapter.global_subagent_files();
+        let names: Vec<String> = files
+            .iter()
+            .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+            .collect();
+        assert!(names.contains(&"cli-agent.json".to_string()), "{names:?}");
+        assert!(names.contains(&"reviewer.md".to_string()), "{names:?}");
+
+        assert_eq!(
+            adapter.project_subagent_patterns(),
+            vec![".kiro/agents/*.json", ".kiro/agents/*.md"]
         );
     }
 }
