@@ -86,6 +86,7 @@
     "installToAgent": "Install to Agent",
     "globalOnly": " · global only (project soon)",
     "hooksNotSupported": "Hooks not supported",
+    "kiroGlobalHooksPending": "Kiro does not load user-level (global) hooks yet (upstream kirodotdev/Kiro#5440) - install this hook per-project instead",
     "crossAgentSoon": "Cross-agent install in project scope is coming in a future release",
     "installToSuccess": "Installed to {{agent}}. Takes effect in new sessions",
     "installToFailed": "Failed to install to {{agent}}",

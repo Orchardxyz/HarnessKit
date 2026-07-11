@@ -1393,6 +1393,16 @@ pub fn install_to_agent(
                 })?;
             entry.event = translated_event;
 
+            // v1 install_to_agent always targets the GLOBAL hook config; bail
+            // out for agents that don't load user-level hooks (e.g. Kiro,
+            // kirodotdev/Kiro#5440) instead of writing a config that would
+            // silently never fire.
+            if !target_adapter.supports_global_hook_install() {
+                return Err(HkError::Validation(format!(
+                    "{target_agent} does not load user-level (global) hooks yet; \
+                     hooks for this agent can only be installed per-project"
+                )));
+            }
             let config_path = target_adapter.hook_config_path();
             deployer::deploy_hook(&config_path, &entry, target_adapter.hook_format())?;
 

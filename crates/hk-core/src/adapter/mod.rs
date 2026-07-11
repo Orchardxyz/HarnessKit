@@ -211,6 +211,15 @@ pub trait AgentAdapter: Send + Sync {
         false
     }
 
+    /// Whether the agent actually LOADS hooks installed at the user-level
+    /// (global) location. `install_to_agent` refuses to deploy a global hook
+    /// when this is `false`, so HK never writes a config the agent silently
+    /// ignores. Scanning/toggling of files already on disk is unaffected.
+    /// Default `true`; override only with verified evidence.
+    fn supports_global_hook_install(&self) -> bool {
+        true
+    }
+
     /// Translate a hook event name from any agent's convention to this agent's convention.
     /// Returns None if the event has no equivalent in this agent.
     /// Mappings are centralized in `hook_events.rs`.
@@ -507,6 +516,23 @@ mod tests {
                 a.supports_native_mcp_toggle(),
                 expected,
                 "{} supports_native_mcp_toggle should be {expected}",
+                a.name()
+            );
+        }
+    }
+
+    #[test]
+    fn test_supports_global_hook_install_false_only_for_kiro() {
+        // Kiro's docs claim `~/.kiro/hooks/` (user-level) but no released
+        // version loads it (kirodotdev/Kiro#5440, #9857; verified on 1.0.89).
+        // Everyone else keeps the default: global hook deploy allowed.
+        let adapters = all_adapters();
+        for a in &adapters {
+            let expected = a.name() != "kiro";
+            assert_eq!(
+                a.supports_global_hook_install(),
+                expected,
+                "{} supports_global_hook_install should be {expected}",
                 a.name()
             );
         }

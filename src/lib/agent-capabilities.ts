@@ -24,7 +24,7 @@ const PROJECT_INSTALL_SUPPORT: Record<string, Set<ExtensionKind>> = {
   copilot: new Set(["skill"]), // MCP adapter completion deferred (v2)
   opencode: new Set(["skill", "mcp"]), // hook unsupported (HookFormat::None)
   hermes: new Set<ExtensionKind>(), // global-only: no project skills (hermes-agent#4667)
-  kiro: new Set(["skill", "mcp", "hook", "cli"]),
+  kiro: new Set(["skill", "mcp", "hook", "cli"]), // project hooks work; GLOBAL hook install is blocked (kirodotdev/Kiro#5440, see supports_global_hook_install)
 };
 
 /** Whether the agent's adapter declares project-level support for this kind.

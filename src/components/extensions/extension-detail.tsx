@@ -515,6 +515,15 @@ export function ExtensionDetail() {
                     const hookUnsupported =
                       group.kind === "hook" &&
                       AGENTS_WITHOUT_HOOKS.has(agent.name);
+                    // Kiro supports hooks, but only loads workspace ones —
+                    // user-level ~/.kiro/hooks/ is documented yet unimplemented
+                    // (kirodotdev/Kiro#5440), and this install path is
+                    // global-only. Mirrors supports_global_hook_install() in
+                    // crates/hk-core/src/adapter/kiro.rs.
+                    const kiroGlobalHooksPending =
+                      group.kind === "hook" && agent.name === "kiro";
+                    const hookBlocked =
+                      hookUnsupported || kiroGlobalHooksPending;
                     const isHermes =
                       agent.name === "hermes" && group.kind === "skill";
                     return (
@@ -522,18 +531,20 @@ export function ExtensionDetail() {
                         key={agent.name}
                         disabled={
                           deploying === agent.name ||
-                          hookUnsupported ||
+                          hookBlocked ||
                           projectScopeBlocked
                         }
                         title={
                           projectScopeBlocked
                             ? t("detail.crossAgentSoon")
-                            : hookUnsupported
-                              ? t("detail.hooksNotSupported")
-                              : undefined
+                            : kiroGlobalHooksPending
+                              ? t("detail.kiroGlobalHooksPending")
+                              : hookUnsupported
+                                ? t("detail.hooksNotSupported")
+                                : undefined
                         }
                         onClick={async () => {
-                          if (hookUnsupported || projectScopeBlocked) return;
+                          if (hookBlocked || projectScopeBlocked) return;
                           if (isHermes) {
                             // Show category picker before deploying
                             const cats = await api
@@ -580,7 +591,7 @@ export function ExtensionDetail() {
                           }
                         }}
                         className={
-                          hookUnsupported || projectScopeBlocked
+                          hookBlocked || projectScopeBlocked
                             ? "flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground/50 cursor-not-allowed"
                             : "flex items-center gap-1.5 rounded-lg border border-border bg-primary/10 px-3 py-1.5 text-xs font-medium text-foreground hover:bg-primary/20 hover:border-ring disabled:opacity-50"
                         }
@@ -591,7 +602,7 @@ export function ExtensionDetail() {
                           <Download size={12} />
                         )}
                         {agentDisplayName(agent.name)}
-                        {hookUnsupported && (
+                        {hookBlocked && (
                           <span className="text-[10px] opacity-60 ml-0.5">
                             (N/A)
                           </span>
