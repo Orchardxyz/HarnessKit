@@ -308,6 +308,7 @@ impl AgentAdapter for HermesAdapter {
                     event: event.to_string(),
                     matcher,
                     command: command.to_string(),
+                    enabled: true,
                 });
             }
         }

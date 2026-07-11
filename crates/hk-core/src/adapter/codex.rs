@@ -307,6 +307,7 @@ impl AgentAdapter for CodexAdapter {
                                 event: event.clone(),
                                 matcher: matcher.clone(),
                                 command,
+                                enabled: true,
                             });
                         }
                     }

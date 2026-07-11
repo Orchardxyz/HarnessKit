@@ -292,6 +292,7 @@ impl AgentAdapter for GeminiAdapter {
                                 event: event.clone(),
                                 matcher: matcher.clone(),
                                 command,
+                                enabled: true,
                             });
                         }
                     }

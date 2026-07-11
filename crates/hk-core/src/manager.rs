@@ -324,6 +324,37 @@ fn toggle_hook(
             .as_ref()
             .map(|p| vec![PathBuf::from(p)])
             .unwrap_or_else(|| a.hook_config_paths_for(&ext.scope));
+        // Kiro hooks have a native per-hook `enabled` flag ("skip without
+        // deleting" — https://kiro.dev/docs/hooks/). Flip it IN PLACE, keeping
+        // the entry, and take NO DB snapshot: the on-disk state is read back by
+        // read_hooks on rescan (same pattern as the native MCP toggle above).
+        if a.hook_format() == adapter::HookFormat::KiroIde {
+            let mut flipped = false;
+            for config_path in &config_paths {
+                if !config_path.is_file() {
+                    continue;
+                }
+                match deployer::set_kiro_hook_enabled(config_path, event, matcher, command, enabled)
+                {
+                    Ok(()) => {
+                        flipped = true;
+                        break;
+                    }
+                    Err(HkError::NotFound(_)) => continue,
+                    Err(e) => return Err(e),
+                }
+            }
+            if !flipped {
+                return Err(HkError::NotFound(format!(
+                    "Hook '{}' not found in config",
+                    ext.name
+                )));
+            }
+            // Clear any stale snapshot so the store upsert CASE trusts the
+            // scanner's on-disk enabled state (disabled_config IS NULL).
+            store.set_disabled_config(&ext.id, None)?;
+            continue;
+        }
         if enabled {
             let saved = store.get_disabled_config(&ext.id)?.ok_or_else(|| {
                 HkError::NotFound(format!("No saved config for hook '{}'", ext.name))
@@ -2250,6 +2281,82 @@ mod tests {
             store.get_extension(&ext.id).unwrap().unwrap().enabled,
             "DB shows enabled"
         );
+    }
+
+    #[test]
+    fn test_kiro_hook_native_disable_enable_in_place() {
+        let dir = TempDir::new().unwrap();
+        let home = dir.path();
+        let hooks_dir = home.join(".kiro/hooks");
+        std::fs::create_dir_all(&hooks_dir).unwrap();
+        std::fs::write(
+            hooks_dir.join("lint.json"),
+            r#"{
+              "version": "v1",
+              "hooks": [
+                {
+                  "name": "lint-on-save",
+                  "trigger": "PostFileSave",
+                  "matcher": "\\.ts$",
+                  "action": { "type": "command", "command": "npm run lint" }
+                },
+                {
+                  "name": "test-on-stop",
+                  "trigger": "Stop",
+                  "action": { "type": "command", "command": "npm test" }
+                }
+              ]
+            }"#,
+        )
+        .unwrap();
+
+        let store = crate::store::Store::open(&dir.path().join("test.db")).unwrap();
+        let adapters: Vec<Box<dyn adapter::AgentAdapter>> = vec![Box::new(
+            adapter::kiro::KiroAdapter::with_home(home.to_path_buf()),
+        )];
+
+        let scanned = scanner::scan_hooks(&*adapters[0]);
+        store.sync_extensions(&scanned).unwrap();
+        let ext = store
+            .list_extensions(Some(ExtensionKind::Hook), None)
+            .unwrap()
+            .into_iter()
+            .find(|e| e.name == "PostFileSave:\\.ts$:npm run lint")
+            .expect("kiro hook scanned");
+        assert!(ext.enabled);
+
+        // DISABLE — native in-place flip: entry stays, sibling untouched.
+        toggle_extension_with_adapters(&store, &adapters, &ext.id, false).unwrap();
+        let doc: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(hooks_dir.join("lint.json")).unwrap())
+                .unwrap();
+        let hooks = doc["hooks"].as_array().unwrap();
+        assert_eq!(hooks.len(), 2, "no entry removed");
+        assert_eq!(hooks[0]["enabled"], false, "target hook disabled in place");
+        assert!(hooks[1].get("enabled").is_none(), "sibling hook untouched");
+        assert!(!store.get_extension(&ext.id).unwrap().unwrap().enabled);
+        assert!(
+            store.get_disabled_config(&ext.id).unwrap().is_none(),
+            "native disable must take no DB snapshot"
+        );
+
+        // RESCAN — scanner reads enabled:false back; disabled state survives.
+        let rescanned = scanner::scan_hooks(&*adapters[0]);
+        let row = rescanned
+            .iter()
+            .find(|e| e.id == ext.id)
+            .expect("hook still scanned while disabled");
+        assert!(!row.enabled, "scanner reflects on-disk enabled:false");
+        store.sync_extensions(&rescanned).unwrap();
+        assert!(!store.get_extension(&ext.id).unwrap().unwrap().enabled);
+
+        // ENABLE — must NOT hit the generic get_disabled_config(NotFound) path.
+        toggle_extension_with_adapters(&store, &adapters, &ext.id, true).unwrap();
+        let doc2: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(hooks_dir.join("lint.json")).unwrap())
+                .unwrap();
+        assert_eq!(doc2["hooks"][0]["enabled"], true);
+        assert!(store.get_extension(&ext.id).unwrap().unwrap().enabled);
     }
 
     // -----------------------------------------------------------------------

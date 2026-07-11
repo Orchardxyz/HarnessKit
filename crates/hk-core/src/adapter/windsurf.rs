@@ -162,6 +162,7 @@ impl AgentAdapter for WindsurfAdapter {
                         event: event.clone(),
                         matcher: None,
                         command: command.to_string(),
+                        enabled: true,
                     });
                 }
             }

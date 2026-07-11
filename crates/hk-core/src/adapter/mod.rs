@@ -65,6 +65,9 @@ pub struct HookEntry {
     pub event: String,
     pub matcher: Option<String>,
     pub command: String,
+    /// On-disk enable state. Only agents with a native per-hook flag (Kiro's
+    /// `enabled`) ever report `false`; formats without one are always `true`.
+    pub enabled: bool,
 }
 
 /// Represents a plugin entry parsed from an agent's config

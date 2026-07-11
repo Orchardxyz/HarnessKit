@@ -57,6 +57,12 @@ impl KiroAdapter {
                 .and_then(|v| v.as_str())
                 .map(String::from),
             command: command.to_string(),
+            // Kiro's native per-hook flag: default true, false = skipped
+            // without deleting (https://kiro.dev/docs/hooks/).
+            enabled: value
+                .get("enabled")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true),
         })
     }
 }
@@ -287,5 +293,9 @@ mod tests {
         assert_eq!(hooks[0].event, "PostFileSave");
         assert_eq!(hooks[0].matcher.as_deref(), Some("\\.ts$"));
         assert_eq!(hooks[0].command, "npm run lint");
+        assert!(
+            !hooks[0].enabled,
+            "natively disabled hook must be listed as disabled, not dropped"
+        );
     }
 }

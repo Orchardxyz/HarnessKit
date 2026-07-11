@@ -453,6 +453,32 @@ pub fn set_kiro_mcp_enabled(
     })
 }
 
+/// Flip a Kiro IDE hook's native `enabled` flag in place, keeping the entry
+/// in the file — mirrors Kiro's own panel toggle ("skip without deleting").
+pub fn set_kiro_hook_enabled(
+    config_path: &Path,
+    event: &str,
+    matcher: Option<&str>,
+    command: &str,
+    enabled: bool,
+) -> Result<(), HkError> {
+    locked_modify_json(config_path, |config| {
+        let hooks = config
+            .get_mut("hooks")
+            .and_then(|v| v.as_array_mut())
+            .ok_or_else(|| HkError::NotFound("No hooks array found".into()))?;
+        let hook = hooks
+            .iter_mut()
+            .find(|h| kiro_hook_matches(h, event, matcher, command))
+            .ok_or_else(|| HkError::NotFound(format!("Hook for '{event}' not found in config")))?;
+        let obj = hook
+            .as_object_mut()
+            .ok_or_else(|| HkError::ConfigCorrupted("hook is not an object".into()))?;
+        obj.insert("enabled".into(), serde_json::Value::Bool(enabled));
+        Ok(())
+    })
+}
+
 fn kiro_hook_matches(
     hook: &serde_json::Value,
     event: &str,
@@ -2551,6 +2577,7 @@ mod tests {
             event: "PreToolUse".into(),
             matcher: Some("Bash".into()),
             command: "echo test".into(),
+            enabled: true,
         };
         deploy_hook(&config, &entry, HookFormat::ClaudeLike).unwrap();
 
@@ -2578,6 +2605,7 @@ mod tests {
             event: "PreToolUse".into(),
             matcher: Some("Bash".into()),
             command: "echo second".into(),
+            enabled: true,
         };
         deploy_hook(&config, &entry, HookFormat::ClaudeLike).unwrap();
 
@@ -2602,6 +2630,7 @@ mod tests {
             event: "PreToolUse".into(),
             matcher: Some("Bash".into()),
             command: "echo test".into(),
+            enabled: true,
         };
         deploy_hook(&config, &entry, HookFormat::ClaudeLike).unwrap();
 
@@ -2774,6 +2803,7 @@ mod tests {
             event: "stop".into(),
             matcher: None,
             command: "echo done".into(),
+            enabled: true,
         };
         deploy_hook(&config, &entry, HookFormat::Cursor).unwrap();
 
@@ -2794,6 +2824,7 @@ mod tests {
             event: "PreToolUse".into(),
             matcher: None,
             command: "./check.sh".into(),
+            enabled: true,
         };
         deploy_hook(&config, &entry, HookFormat::Copilot).unwrap();
 
@@ -2812,6 +2843,7 @@ mod tests {
             event: "pre_user_prompt".into(),
             matcher: None,
             command: "echo hi".into(),
+            enabled: true,
         };
         deploy_hook(&config, &entry, HookFormat::Windsurf).unwrap();
 
@@ -2829,6 +2861,7 @@ mod tests {
             event: "PostFileSave".into(),
             matcher: Some("\\.ts$".into()),
             command: "npm run lint".into(),
+            enabled: true,
         };
         deploy_hook(&config, &entry, HookFormat::KiroIde).unwrap();
         let deployed: serde_json::Value =
@@ -2914,6 +2947,48 @@ mod tests {
     }
 
     #[test]
+    fn test_set_kiro_hook_enabled_flips_in_place() {
+        let dir = TempDir::new().unwrap();
+        let config = dir.path().join("lint.json");
+        let entry = HookEntry {
+            event: "PostFileSave".into(),
+            matcher: Some("\\.ts$".into()),
+            command: "npm run lint".into(),
+            enabled: true,
+        };
+        deploy_hook(&config, &entry, HookFormat::KiroIde).unwrap();
+
+        set_kiro_hook_enabled(
+            &config,
+            "PostFileSave",
+            Some("\\.ts$"),
+            "npm run lint",
+            false,
+        )
+        .unwrap();
+        let doc: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+        assert_eq!(doc["hooks"].as_array().unwrap().len(), 1, "entry kept");
+        assert_eq!(doc["hooks"][0]["enabled"], false);
+
+        set_kiro_hook_enabled(
+            &config,
+            "PostFileSave",
+            Some("\\.ts$"),
+            "npm run lint",
+            true,
+        )
+        .unwrap();
+        let doc2: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+        assert_eq!(doc2["hooks"][0]["enabled"], true);
+
+        // Unknown hook → NotFound, so callers can fall through to other files.
+        let err = set_kiro_hook_enabled(&config, "Stop", None, "missing", false).unwrap_err();
+        assert!(matches!(err, HkError::NotFound(_)));
+    }
+
+    #[test]
     fn test_remove_hook_cursor_format() {
         let dir = TempDir::new().unwrap();
         let config = dir.path().join("hooks.json");
@@ -2991,6 +3066,7 @@ mod tests {
             event: "pre_tool_call".into(),
             matcher: Some("terminal".into()),
             command: "~/.hermes/agent-hooks/block.sh".into(),
+            enabled: true,
         };
         deploy_hook(&cfg, &entry, HookFormat::HermesYaml).unwrap();
         let doc: serde_yaml::Value =
@@ -3053,6 +3129,7 @@ mod tests {
             event: "pre_tool_call".into(),
             matcher: Some("terminal".into()),
             command: "~/.hermes/agent-hooks/block.sh".into(),
+            enabled: true,
         };
         // Deploying the identical hook twice must not duplicate the list item.
         deploy_hook(&cfg, &entry, HookFormat::HermesYaml).unwrap();
@@ -3076,6 +3153,7 @@ mod tests {
             event: "on_session_start".into(),
             matcher: None,
             command: "~/.hermes/agent-hooks/log.sh".into(),
+            enabled: true,
         };
         deploy_hook(&cfg, &entry, HookFormat::HermesYaml).unwrap();
 
