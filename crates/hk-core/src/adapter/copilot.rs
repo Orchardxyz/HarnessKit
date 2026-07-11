@@ -410,6 +410,7 @@ impl AgentAdapter for CopilotAdapter {
                             event: event.clone(),
                             matcher: None,
                             command: cmd_str.to_string(),
+                            enabled: true,
                         });
                     }
                 }

@@ -6,6 +6,7 @@ pub mod cursor;
 pub mod gemini;
 pub mod hermes;
 pub mod hook_events;
+pub mod kiro;
 pub mod opencode;
 pub mod windsurf;
 
@@ -64,6 +65,9 @@ pub struct HookEntry {
     pub event: String,
     pub matcher: Option<String>,
     pub command: String,
+    /// On-disk enable state. Only agents with a native per-hook flag (Kiro's
+    /// `enabled`) ever report `false`; formats without one are always `true`.
+    pub enabled: bool,
 }
 
 /// Represents a plugin entry parsed from an agent's config
@@ -102,6 +106,10 @@ pub enum HookFormat {
     /// is a list of `{matcher?, command, timeout?}`. Routed through dedicated
     /// YAML helpers in deployer.rs (NOT locked_modify_json, which is JSON-only).
     HermesYaml,
+    /// Kiro IDE hook files (`~/.kiro/hooks/*.json`, `.kiro/hooks/*.json`).
+    /// Each file has `{version, hooks: [{name, trigger, matcher?, action, timeout?}]}`.
+    /// Only command actions map to HarnessKit's shell-command HookEntry model.
+    KiroIde,
     /// Agent does not support hooks
     None,
 }
@@ -201,6 +209,15 @@ pub trait AgentAdapter: Send + Sync {
     /// taken. Default `false` (the remove+snapshot path).
     fn supports_native_mcp_toggle(&self) -> bool {
         false
+    }
+
+    /// Whether the agent actually LOADS hooks installed at the user-level
+    /// (global) location. `install_to_agent` refuses to deploy a global hook
+    /// when this is `false`, so HK never writes a config the agent silently
+    /// ignores. Scanning/toggling of files already on disk is unaffected.
+    /// Default `true`; override only with verified evidence.
+    fn supports_global_hook_install(&self) -> bool {
+        true
     }
 
     /// Translate a hook event name from any agent's convention to this agent's convention.
@@ -379,6 +396,13 @@ pub trait AgentAdapter: Send + Sync {
         }
     }
 
+    /// Resolve every hook config file for a scope. Most agents have exactly
+    /// one hook config file, so the default wraps `hook_config_path_for`.
+    /// Agents such as Kiro can override this to scan a directory of hook files.
+    fn hook_config_paths_for(&self, scope: &ConfigScope) -> Vec<PathBuf> {
+        self.hook_config_path_for(scope).into_iter().collect()
+    }
+
     /// Resolve the skill directory for a given scope.
     /// - `Global` → first entry of `skill_dirs()` (today's behavior).
     /// - `Project` → `<project>/<project_skill_dirs()[0]>`, or `None` if
@@ -431,6 +455,7 @@ pub fn all_adapters() -> Vec<Box<dyn AgentAdapter>> {
         Box::new(windsurf::WindsurfAdapter::new()),
         Box::new(opencode::OpencodeAdapter::new()),
         Box::new(hermes::HermesAdapter::new()),
+        Box::new(kiro::KiroAdapter::new()),
     ]
 }
 
@@ -439,9 +464,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_all_adapters_returns_nine() {
+    fn test_all_adapters_returns_ten() {
         let adapters = all_adapters();
-        assert_eq!(adapters.len(), 9);
+        assert_eq!(adapters.len(), 10);
         let names: Vec<&str> = adapters.iter().map(|a| a.name()).collect();
         assert!(names.contains(&"claude"));
         assert!(names.contains(&"cursor"));
@@ -452,6 +477,7 @@ mod tests {
         assert!(names.contains(&"windsurf"));
         assert!(names.contains(&"opencode"));
         assert!(names.contains(&"hermes"));
+        assert!(names.contains(&"kiro"));
     }
 
     #[test]
@@ -471,7 +497,9 @@ mod tests {
         // setups). Adding an agent here without a confirmed PATH bug would
         // unnecessarily rewrite users' mcp_config.json with absolute paths,
         // hurting cross-machine portability.
-        for name in ["claude", "codex", "gemini", "cursor", "copilot", "opencode", "hermes"] {
+        for name in [
+            "claude", "codex", "gemini", "cursor", "copilot", "opencode", "hermes", "kiro",
+        ] {
             assert!(
                 !by_name[name].needs_path_injection(),
                 "{name} should not need path injection"
@@ -480,14 +508,31 @@ mod tests {
     }
 
     #[test]
-    fn test_supports_native_mcp_toggle_only_hermes() {
+    fn test_supports_native_mcp_toggle_only_native_agents() {
         let adapters = all_adapters();
         for a in &adapters {
-            let expected = a.name() == "hermes";
+            let expected = a.name() == "hermes" || a.name() == "kiro";
             assert_eq!(
                 a.supports_native_mcp_toggle(),
                 expected,
                 "{} supports_native_mcp_toggle should be {expected}",
+                a.name()
+            );
+        }
+    }
+
+    #[test]
+    fn test_supports_global_hook_install_false_only_for_kiro() {
+        // Kiro's docs claim `~/.kiro/hooks/` (user-level) but no released
+        // version loads it (kirodotdev/Kiro#5440, #9857; verified on 1.0.89).
+        // Everyone else keeps the default: global hook deploy allowed.
+        let adapters = all_adapters();
+        for a in &adapters {
+            let expected = a.name() != "kiro";
+            assert_eq!(
+                a.supports_global_hook_install(),
+                expected,
+                "{} supports_global_hook_install should be {expected}",
                 a.name()
             );
         }
@@ -603,6 +648,7 @@ mod tests {
             ("antigravity", ".agents/skills"), // 1.18.4+ canonical; .agent/ kept as backward-compat alias
             ("copilot", ".github/skills"),
             ("opencode", ".opencode/skills"),
+            ("kiro", ".kiro/skills"),
             // hermes is global-only — no project skill dir (hermes-agent#4667).
         ]
         .into_iter()

@@ -313,6 +313,7 @@ describe("sortAgentNames", () => {
       "cursor",
       "claude",
       "gemini",
+      "kiro",
     ]);
     expect(result).toEqual([
       "claude",
@@ -320,6 +321,7 @@ describe("sortAgentNames", () => {
       "cursor",
       "windsurf",
       "opencode",
+      "kiro",
     ]);
   });
 
@@ -337,6 +339,7 @@ describe("agentDisplayName", () => {
     expect(agentDisplayName("cursor")).toBe("Cursor");
     expect(agentDisplayName("windsurf")).toBe("Windsurf");
     expect(agentDisplayName("opencode")).toBe("OpenCode");
+    expect(agentDisplayName("kiro")).toBe("Kiro");
   });
 
   it("capitalizes first letter for unknown agents", () => {

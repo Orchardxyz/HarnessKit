@@ -148,6 +148,7 @@ impl AgentAdapter for CursorAdapter {
                         event: event.clone(),
                         matcher: None,
                         command: cmd.to_string(),
+                        enabled: true,
                     });
                 }
             }

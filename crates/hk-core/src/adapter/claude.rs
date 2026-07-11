@@ -193,6 +193,7 @@ impl AgentAdapter for ClaudeAdapter {
                                 event: event.clone(),
                                 matcher: matcher.clone(),
                                 command,
+                                enabled: true,
                             });
                         }
                     }

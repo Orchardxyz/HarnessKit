@@ -19,6 +19,7 @@ describe("canInstallAtScope", () => {
 
   it("returns true at project scope for an agent that supports project skills", () => {
     expect(canInstallAtScope("claude", "skill", PROJECT)).toBe(true);
+    expect(canInstallAtScope("kiro", "hook", PROJECT)).toBe(true);
   });
 
   it("returns false at project scope for Hermes (global-only, hermes-agent#4667)", () => {
