@@ -1,4 +1,9 @@
-import type { Extension, ExtensionKind, GroupedExtension } from "@/lib/types";
+import type {
+  ConfigScope,
+  Extension,
+  ExtensionKind,
+  GroupedExtension,
+} from "@/lib/types";
 import {
   deriveExtensionUrl,
   extensionGroupKey,
@@ -55,6 +60,60 @@ function deduplicatePermissions(
     }
   }
   return result;
+}
+
+/** Instances visible in `scope` (All mode = everything). The single scope
+ *  projection every display surface builds on — badges, the agent filter,
+ *  the detail panel's PATHS cards and DOCUMENTATION tabs — so they can
+ *  never disagree about what exists in the active scope. Accepts
+ *  ConfigScope too (ConfigScope ⊂ ScopeValue). */
+export function instancesInScope(
+  instances: Extension[],
+  scope: ScopeValue | ConfigScope,
+): Extension[] {
+  if (scope.type === "all") return instances;
+  const key = scope.type === "global" ? "global" : scope.path;
+  return instances.filter((i) => scopeKey(i.scope) === key);
+}
+
+/** Agent names that have an instance of `group` in `scope`. All mode
+ *  returns the full cross-scope union. Group identity (`group.agents`)
+ *  stays scope-free — this is a DISPLAY/FILTER projection. */
+export function agentsInScope(
+  group: GroupedExtension,
+  scope: ScopeValue,
+): string[] {
+  if (scope.type === "all") return group.agents;
+  return sortAgentNames([
+    ...new Set(
+      instancesInScope(group.instances, scope).flatMap((i) => i.agents),
+    ),
+  ]);
+}
+
+/** Scope an Install-to-Agent action targets for a given active scope:
+ *  the project itself in project mode, Global otherwise. All-mode callers
+ *  use the explicit ScopeTargetField picker instead of calling this; the
+ *  all→global branch remains as a safe fallback. */
+export function resolveInstallTargetScope(scope: ScopeValue): ConfigScope {
+  return scope.type === "project"
+    ? { type: "project", name: scope.name, path: scope.path }
+    : { type: "global" };
+}
+
+/** Instance a cross-agent install copies from: prefer the copy already in
+ *  the target scope, then a global copy, then anything. The backend reads
+ *  the source through the instance's own scope, so any instance works. */
+export function pickSourceInstance(
+  instances: Extension[],
+  targetScope: ConfigScope,
+): Extension | undefined {
+  const targetKey = scopeKey(targetScope);
+  return (
+    instances.find((i) => scopeKey(i.scope) === targetKey) ??
+    instances.find((i) => i.scope.type === "global") ??
+    instances[0]
+  );
 }
 
 export function buildGroups(extensions: Extension[]): GroupedExtension[] {
@@ -209,7 +268,12 @@ export function getCachedFiltered(
     result = result.filter((g) => g.kind === kindFilter);
   }
   if (agentFilter) {
-    result = result.filter((g) => g.agents.includes(agentFilter));
+    // Match against the active scope's agents (same projection the badge
+    // column renders) so the filter can never surface a card whose visible
+    // badges don't contain the filtered agent.
+    result = result.filter((g) =>
+      agentsInScope(g, scope).includes(agentFilter),
+    );
   }
   if (packFilter) {
     result = result.filter((g) => g.pack === packFilter);
@@ -220,12 +284,8 @@ export function getCachedFiltered(
   if (scope.type !== "all") {
     // Match if any instance is in the requested scope. After Phase C dedup,
     // a single group can span multiple scopes, so we look across instances.
-    const targetKey = scope.type === "global" ? "global" : scope.path;
-    result = result.filter((g) =>
-      g.instances.some((i) => {
-        const instKey = i.scope.type === "global" ? "global" : i.scope.path;
-        return instKey === targetKey;
-      }),
+    result = result.filter(
+      (g) => instancesInScope(g.instances, scope).length > 0,
     );
   }
   if (searchQuery.trim()) {

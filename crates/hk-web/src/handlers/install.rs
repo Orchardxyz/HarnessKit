@@ -246,6 +246,10 @@ pub struct InstallToAgentParams {
     pub extension_id: String,
     pub target_agent: String,
     pub hermes_category: Option<String>,
+    /// Required, like every sibling install endpoint (the frontend sends it
+    /// as of the same release): an implicit Global default could silently
+    /// misroute a project-scope install from an out-of-date client.
+    pub target_scope: ConfigScope,
 }
 
 pub async fn install_to_agent(
@@ -276,6 +280,7 @@ pub async fn install_to_agent(
             &params.extension_id,
             &params.target_agent,
             params.hermes_category.as_deref(),
+            &params.target_scope,
         )?;
 
         // Web-only: re-scan + sync after a successful deploy so the new
@@ -287,7 +292,17 @@ pub async fn install_to_agent(
         let scanned = scanner::scan_all(&state.adapters, &projects);
         store.sync_extensions(&scanned)?;
 
-        Ok(scanner::stable_id_for(&ext_name, ext_kind.as_str(), &params.target_agent))
+        // Scope-correct ID for the deployed row. Known pre-existing caveat:
+        // for hooks the service deploys under a *translated* event name
+        // (agents disagree on event naming), so the ID recomputed from the
+        // source name may not match the scanned row; the frontend currently
+        // discards this value, so the mismatch is latent, not user-visible.
+        Ok(scanner::stable_id_with_scope_for(
+            &ext_name,
+            ext_kind.as_str(),
+            &params.target_agent,
+            &params.target_scope,
+        ))
     }).await
 }
 

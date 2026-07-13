@@ -242,14 +242,16 @@ export function extensionGroupKey(ext: Extension): string {
   // marketplace skill will set install_meta and the URL branch above wins,
   // so it correctly merges with same-source siblings in other scopes.
   //
-  // MCP is the exception: an MCP server's name IS its identity (it's the
-  // top-level key in mcpServers / [mcp_servers]), so the same name across
-  // scopes/agents always refers to the same logical server. Dropping the
-  // scope-fallback for MCP collapses Global + Project copies into one
-  // group, matching how Skills merge once they share a URL.
+  // MCP and hooks are the exception: their name IS their identity — an MCP
+  // server's name is the top-level key in mcpServers / [mcp_servers], and a
+  // hook's logical name is its command string. The same name across
+  // scopes/agents always refers to the same logical entry, so dropping the
+  // scope-fallback collapses Global + Project copies into one group,
+  // matching how Skills merge once they share a URL (cross-scope hook
+  // copies are exactly what install-to-project creates).
   const url = deriveExtensionUrl(ext);
   const developer =
-    ext.kind === "mcp"
+    ext.kind === "mcp" || ext.kind === "hook"
       ? url
         ? extractDeveloper(url)
         : ""
@@ -307,6 +309,25 @@ export interface AgentInfo {
   extension_count: number;
   path: string;
   enabled: boolean;
+  capabilities: AgentCapabilities;
+}
+
+/** Field names mirror the Rust structs in crates/hk-core/src/models.rs
+ *  verbatim (snake_case, no serde renames). */
+export interface KindFlags {
+  skill: boolean;
+  mcp: boolean;
+  hook: boolean;
+  cli: boolean;
+}
+
+/** Install-capability facts derived by the backend from each agent's
+ *  adapter declarations (AgentCapabilities::from_adapter) — the single
+ *  source of truth for per-(agent, kind, scope) install gating. */
+export interface AgentCapabilities {
+  project_install: KindFlags;
+  hooks_supported: boolean;
+  global_hook_install: boolean;
 }
 
 export type ConfigCategory =

@@ -635,6 +635,7 @@ pub async fn install_to_agent(
     extension_id: String,
     target_agent: String,
     hermes_category: Option<String>,
+    target_scope: ConfigScope,
 ) -> Result<String, HkError> {
     let store = state.store.clone();
     let adapters = state.adapters.clone();
@@ -645,6 +646,7 @@ pub async fn install_to_agent(
             &extension_id,
             &target_agent,
             hermes_category.as_deref(),
+            &target_scope,
         )
     })
     .await

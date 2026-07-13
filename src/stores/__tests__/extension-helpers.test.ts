@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { Extension } from "@/lib/types";
+import type { ScopeValue } from "@/stores/scope-store";
 import {
+  agentsInScope,
   buildGroups,
   expandGroupKeys,
   getCachedFiltered,
   getCachedGroups,
+  instancesInScope,
+  pickSourceInstance,
+  resolveInstallTargetScope,
 } from "../extension-helpers";
 
 const baseExt: Extension = {
@@ -370,5 +375,229 @@ describe("getCachedFiltered with scope", () => {
       type: "all",
     });
     expect(result.length).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveInstallTargetScope / pickSourceInstance
+// ---------------------------------------------------------------------------
+
+describe("resolveInstallTargetScope", () => {
+  it("targets the project itself in project mode", () => {
+    expect(
+      resolveInstallTargetScope({
+        type: "project",
+        name: "demo",
+        path: "/tmp/demo",
+      }),
+    ).toEqual({ type: "project", name: "demo", path: "/tmp/demo" });
+  });
+
+  it("falls back to Global in Global and All modes", () => {
+    expect(resolveInstallTargetScope({ type: "global" })).toEqual({
+      type: "global",
+    });
+    expect(resolveInstallTargetScope({ type: "all" })).toEqual({
+      type: "global",
+    });
+  });
+});
+
+describe("pickSourceInstance", () => {
+  const globalInst = {
+    ...baseExt,
+    id: "g",
+    scope: { type: "global" } as const,
+  };
+  const projInst = {
+    ...baseExt,
+    id: "p",
+    scope: { type: "project", name: "demo", path: "/tmp/demo" } as const,
+  };
+
+  it("prefers the instance already in the target scope", () => {
+    expect(
+      pickSourceInstance([globalInst, projInst], {
+        type: "project",
+        name: "demo",
+        path: "/tmp/demo",
+      })?.id,
+    ).toBe("p");
+    expect(
+      pickSourceInstance([globalInst, projInst], { type: "global" })?.id,
+    ).toBe("g");
+  });
+
+  it("falls back to a global instance, then to anything", () => {
+    // Target project has no copy — global copy is the scope-safe source.
+    expect(
+      pickSourceInstance([projInst, globalInst], {
+        type: "project",
+        name: "other",
+        path: "/tmp/other",
+      })?.id,
+    ).toBe("g");
+    // Project-only group (global row deleted): any instance is valid.
+    expect(pickSourceInstance([projInst], { type: "global" })?.id).toBe("p");
+    expect(pickSourceInstance([], { type: "global" })).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// agentsInScope
+// ---------------------------------------------------------------------------
+
+describe("agentsInScope", () => {
+  // Skill "my-skill": global copy on claude+cursor, project copy on claude.
+  const globalInst = {
+    ...baseExt,
+    id: "g",
+    agents: ["claude", "cursor"],
+    scope: { type: "global" } as const,
+  };
+  const projInst = {
+    ...baseExt,
+    id: "p",
+    agents: ["claude"],
+    scope: { type: "project", name: "demo", path: "/tmp/demo" } as const,
+  };
+  const group = buildGroups([globalInst, projInst])[0];
+
+  it("returns only the active scope's agents in global/project modes", () => {
+    expect(agentsInScope(group, { type: "global" })).toEqual([
+      "claude",
+      "cursor",
+    ]);
+    // cursor has no copy in the project — it must not leak into the badges.
+    expect(
+      agentsInScope(group, {
+        type: "project",
+        name: "demo",
+        path: "/tmp/demo",
+      }),
+    ).toEqual(["claude"]);
+  });
+
+  it("returns the full union in All mode", () => {
+    expect(agentsInScope(group, { type: "all" })).toEqual(group.agents);
+  });
+
+  it("returns empty for a scope with no instances", () => {
+    expect(
+      agentsInScope(group, {
+        type: "project",
+        name: "other",
+        path: "/tmp/other",
+      }),
+    ).toEqual([]);
+  });
+});
+
+describe("getCachedFiltered agent filter is scope-aware", () => {
+  it("does not surface a group whose filtered agent only exists in another scope", () => {
+    const globalInst = {
+      ...baseExt,
+      id: "g2",
+      agents: ["cursor"],
+      scope: { type: "global" } as const,
+    };
+    const projInst = {
+      ...baseExt,
+      id: "p2",
+      agents: ["claude"],
+      scope: { type: "project", name: "demo", path: "/tmp/demo" } as const,
+    };
+    const groups = buildGroups([globalInst, projInst]);
+    const project: ScopeValue = {
+      type: "project",
+      name: "demo",
+      path: "/tmp/demo",
+    };
+    // cursor's copy is global-only: filtering by cursor in project mode
+    // must yield nothing (badges wouldn't show cursor either).
+    expect(
+      getCachedFiltered(groups, null, "cursor", null, null, "", project),
+    ).toHaveLength(0);
+    expect(
+      getCachedFiltered(groups, null, "claude", null, null, "", project),
+    ).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// instancesInScope
+// ---------------------------------------------------------------------------
+
+describe("instancesInScope", () => {
+  const globalInst = {
+    ...baseExt,
+    id: "gi",
+    scope: { type: "global" } as const,
+  };
+  const projInst = {
+    ...baseExt,
+    id: "pi",
+    scope: { type: "project", name: "demo", path: "/tmp/demo" } as const,
+  };
+  const all = [globalInst, projInst];
+
+  it("filters by global / project path, passes everything through in All", () => {
+    expect(instancesInScope(all, { type: "global" }).map((i) => i.id)).toEqual([
+      "gi",
+    ]);
+    expect(
+      instancesInScope(all, {
+        type: "project",
+        name: "demo",
+        path: "/tmp/demo",
+      }).map((i) => i.id),
+    ).toEqual(["pi"]);
+    // Project match is by PATH, not name.
+    expect(
+      instancesInScope(all, {
+        type: "project",
+        name: "demo",
+        path: "/tmp/other",
+      }),
+    ).toEqual([]);
+    expect(instancesInScope(all, { type: "all" })).toHaveLength(2);
+  });
+});
+
+describe("hook grouping merges across scopes (like MCP)", () => {
+  it("global + project copies of the same hook command form ONE group", () => {
+    // A hook's logical name is its command — same command across scopes is
+    // the same logical hook (install-to-project creates exactly this pair).
+    // Note: events may differ across agents (translated names).
+    const shared = {
+      ...baseExt,
+      kind: "hook" as const,
+      source: {
+        origin: "agent" as const,
+        url: null,
+        version: null,
+        commit_hash: null,
+      },
+    };
+    const globalHook = {
+      ...shared,
+      id: "hg",
+      name: "AfterAgent:*:afplay Glass.aiff",
+      agents: ["claude"],
+      scope: { type: "global" } as const,
+    };
+    const projectHook = {
+      ...shared,
+      id: "hp",
+      name: "Stop:*:afplay Glass.aiff",
+      agents: ["kiro"],
+      scope: { type: "project", name: "demo", path: "/tmp/demo" } as const,
+    };
+    const groups = buildGroups([globalHook, projectHook]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].instances).toHaveLength(2);
+    expect(groups[0].agents).toEqual(
+      expect.arrayContaining(["claude", "kiro"]),
+    );
   });
 });
