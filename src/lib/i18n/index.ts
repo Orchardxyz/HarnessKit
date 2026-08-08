@@ -1,12 +1,21 @@
 import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
 
-export const SUPPORTED_LANGUAGES = ["en", "zh"] as const;
+export const SUPPORTED_LANGUAGES = ["en", "zh", "zh-TW"] as const;
 export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
 export const LANGUAGE_PREFERENCES = ["system", ...SUPPORTED_LANGUAGES] as const;
 export type LanguagePreference = (typeof LANGUAGE_PREFERENCES)[number];
 
 export const LANGUAGE_STORAGE_KEY = "hk-language";
+
+// Single source of truth for language fallbacks; languages not listed fall
+// straight back to English. Consumed by the i18next config below and by
+// changelog localization, so UI strings and release notes degrade the same way.
+export const FALLBACK_CHAINS: Partial<
+  Record<SupportedLanguage, SupportedLanguage[]>
+> = {
+  "zh-TW": ["zh", "en"],
+};
 
 // Eagerly load all locale JSON at build time. Path format: "./locales/<lang>/<namespace>.json"
 const localeModules = import.meta.glob<Record<string, unknown>>(
@@ -40,6 +49,14 @@ export function mapLocaleToSupportedLanguage(
   if (!locale) return null;
 
   const normalized = locale.toLowerCase();
+  if (
+    normalized === "zh-tw" ||
+    normalized === "zh-hk" ||
+    normalized === "zh-mo" ||
+    normalized === "zh-hant" ||
+    normalized.startsWith("zh-hant-")
+  )
+    return "zh-TW";
   if (normalized === "zh" || normalized.startsWith("zh-")) return "zh";
   if (normalized === "en" || normalized.startsWith("en-")) return "en";
   return null;
@@ -89,7 +106,7 @@ const initialLanguage = resolveLanguagePreference(initialPreference);
 i18n.use(initReactI18next).init({
   resources,
   lng: initialLanguage,
-  fallbackLng: "en",
+  fallbackLng: { ...FALLBACK_CHAINS, default: ["en"] },
   supportedLngs: SUPPORTED_LANGUAGES,
   defaultNS: "common",
   ns: NAMESPACES,

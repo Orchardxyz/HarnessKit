@@ -1,4 +1,8 @@
-import { mapLocaleToSupportedLanguage } from "./index";
+import {
+  FALLBACK_CHAINS,
+  mapLocaleToSupportedLanguage,
+  type SupportedLanguage,
+} from "./index";
 
 // Matches a language fence like `<!-- lang:en -->` / `<!-- lang:zh -->`.
 const LANG_FENCE = /<!--\s*lang:([a-z-]+)\s*-->/gi;
@@ -40,6 +44,13 @@ const LANG_COMMENT_BLOCK = /<!--\s*lang:([a-z-]+)[ \t]*\n([\s\S]*?)-->/gi;
 // sections borrow it from the English one (with a localized heading).
 const NEUTRAL_TAIL = /^## What's Changed\s*$/m;
 
+// Localized headings for the borrowed tail. Languages without an entry keep
+// the English heading — readable everywhere, unlike a wrong-language one.
+const TAIL_HEADINGS: Partial<Record<SupportedLanguage, string>> = {
+  zh: "## 变更列表",
+  "zh-TW": "## 變更列表",
+};
+
 export function localizeChangelog(body: string, language: string): string {
   const sections: Record<string, string> = {};
 
@@ -77,8 +88,11 @@ export function localizeChangelog(body: string, language: string): string {
   if (Object.keys(sections).length === 0) return normalized.trim();
 
   const lang = mapLocaleToSupportedLanguage(language) ?? "en";
+  const chain = [lang, ...(FALLBACK_CHAINS[lang] ?? []), "en"];
   const selected =
-    sections[lang] ?? sections.en ?? Object.values(sections)[0] ?? normalized.trim();
+    chain.map((code) => sections[code]).find(Boolean) ??
+    Object.values(sections)[0] ??
+    normalized.trim();
 
   // Borrow the English tail for non-English sections.
   if (lang !== "en" && sections.en && selected !== sections.en) {
@@ -86,7 +100,7 @@ export function localizeChangelog(body: string, language: string): string {
     if (tailStart !== -1) {
       const tail = sections.en
         .slice(tailStart)
-        .replace(NEUTRAL_TAIL, "## 变更列表");
+        .replace(NEUTRAL_TAIL, TAIL_HEADINGS[lang] ?? "## What's Changed");
       return `${selected}\n\n${tail}`;
     }
   }
