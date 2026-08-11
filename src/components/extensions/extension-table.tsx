@@ -312,30 +312,39 @@ export function ExtensionTable({
             ))}
           </thead>
           <tbody className="divide-y divide-border">
-            {rows.map((row) => (
-              <tr
-                key={row.id}
-                id={`ext-row-${row.id}`}
-                onClick={() =>
-                  setSelectedId(
-                    row.original.groupKey === selectedId
-                      ? null
-                      : row.original.groupKey,
-                  )
-                }
-                className={`cursor-pointer transition-colors duration-150 ${
-                  row.original.groupKey === selectedId
-                    ? "bg-accent border-l-2 border-l-primary"
-                    : "hover:bg-muted/40"
-                }`}
-              >
-                {row.getVisibleCells().map((cell) => (
-                  <td key={cell.id} className="px-4 py-3 text-sm">
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </td>
-                ))}
-              </tr>
-            ))}
+            {rows.map((row) => {
+              const isSelected = row.original.groupKey === selectedId;
+              return (
+                <tr
+                  key={row.id}
+                  id={`ext-row-${row.id}`}
+                  onClick={() =>
+                    setSelectedId(isSelected ? null : row.original.groupKey)
+                  }
+                  className={`cursor-pointer transition-colors duration-150 ${
+                    isSelected ? "bg-accent" : "hover:bg-muted/40"
+                  }`}
+                >
+                  {row.getVisibleCells().map((cell, i) => (
+                    <td
+                      key={cell.id}
+                      className={`px-4 py-3 text-sm${i === 0 ? " relative" : ""}`}
+                    >
+                      {i === 0 && isSelected && (
+                        <span
+                          aria-hidden="true"
+                          className="animate-grow-y absolute left-1 top-1/2 h-6 w-[3px] -translate-y-1/2 rounded-full bg-primary"
+                        />
+                      )}
+                      {flexRender(
+                        cell.column.columnDef.cell,
+                        cell.getContext(),
+                      )}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
