@@ -135,6 +135,16 @@ fn cli_stable_id(binary_name: &str) -> String {
     format!("{:016x}", fnv1a(key.as_bytes()))
 }
 
+fn extend_unique_by_id(target: &mut Vec<Extension>, extensions: Vec<Extension>) {
+    let mut seen: std::collections::HashSet<String> =
+        target.iter().map(|ext| ext.id.clone()).collect();
+    for extension in extensions {
+        if seen.insert(extension.id.clone()) {
+            target.push(extension);
+        }
+    }
+}
+
 /// Scan a skill directory and return Extension entries.
 pub fn scan_skill_dir(dir: &Path, agent_name: &str) -> Vec<Extension> {
     let mut extensions = Vec::new();
@@ -343,13 +353,13 @@ fn mcp_remote_profile(server: &crate::adapter::McpServerEntry) -> (Vec<Permissio
         .unwrap_or_default();
     // Drop any userinfo (`user:pass@host`) so credentials embedded in the
     // URL never leak into the permission list or description.
-    let host = authority
-        .rsplit('@')
-        .next()
-        .unwrap_or_default()
-        .to_string();
+    let host = authority.rsplit('@').next().unwrap_or_default().to_string();
     permissions.push(Permission::Network {
-        domains: vec![if host.is_empty() { "*".into() } else { host.clone() }],
+        domains: vec![if host.is_empty() {
+            "*".into()
+        } else {
+            host.clone()
+        }],
     });
     let label = match server.transport {
         crate::adapter::McpTransport::Sse => "SSE",
@@ -604,7 +614,11 @@ pub(crate) fn run_which(name: &str) -> Option<String> {
             let s = String::from_utf8_lossy(&o.stdout);
             // `where` on Windows may return multiple lines; take only the first.
             let s = s.lines().next().unwrap_or("").trim().to_string();
-            if s.is_empty() { None } else { Some(s) }
+            if s.is_empty() {
+                None
+            } else {
+                Some(s)
+            }
         })
 }
 
@@ -997,7 +1011,7 @@ pub fn scan_adapter(adapter: &dyn crate::adapter::AgentAdapter) -> Vec<Extension
 pub fn scan_skills_for(adapter: &dyn crate::adapter::AgentAdapter) -> Vec<Extension> {
     let mut exts = Vec::new();
     for skill_dir in adapter.skill_dirs() {
-        exts.extend(scan_skill_dir(&skill_dir, adapter.name()));
+        extend_unique_by_id(&mut exts, scan_skill_dir(&skill_dir, adapter.name()));
     }
     exts
 }
@@ -1028,7 +1042,7 @@ pub fn scan_project_extensions(
             skill.scope = scope.clone();
             skill.id = stable_id_with_scope(&skill.name, "skill", adapter.name(), &scope);
         }
-        all.extend(skills);
+        extend_unique_by_id(&mut all, skills);
     }
 
     // --- Project-scoped MCP servers ---
@@ -1136,7 +1150,9 @@ pub fn scan_project_extensions(
         }
     }
 
-    all
+    let mut deduped = Vec::new();
+    extend_unique_by_id(&mut deduped, all);
+    deduped
 }
 
 /// Scan all extensions from all detected agents.
@@ -1153,20 +1169,19 @@ pub fn scan_all(
             continue;
         }
         for skill_dir in adapter.skill_dirs() {
-            all.extend(scan_skill_dir(&skill_dir, adapter.name()));
+            extend_unique_by_id(&mut all, scan_skill_dir(&skill_dir, adapter.name()));
         }
-        all.extend(scan_mcp_servers(adapter.as_ref()));
-        all.extend(scan_hooks(adapter.as_ref()));
-        all.extend(scan_plugins(adapter.as_ref()));
+        extend_unique_by_id(&mut all, scan_mcp_servers(adapter.as_ref()));
+        extend_unique_by_id(&mut all, scan_hooks(adapter.as_ref()));
+        extend_unique_by_id(&mut all, scan_plugins(adapter.as_ref()));
 
         // Project-scoped extensions for every known project
         for (project_name, project_path) in projects {
             let path = Path::new(project_path);
-            all.extend(scan_project_extensions(
-                adapter.as_ref(),
-                project_name,
-                path,
-            ));
+            extend_unique_by_id(
+                &mut all,
+                scan_project_extensions(adapter.as_ref(), project_name, path),
+            );
         }
     }
 
@@ -2176,7 +2191,11 @@ fn resolve_pattern(root: &std::path::Path, pattern: &str) -> Vec<std::path::Path
             .unwrap_or_default()
     } else {
         let path = root.join(pattern);
-        if path.exists() { vec![path] } else { vec![] }
+        if path.exists() {
+            vec![path]
+        } else {
+            vec![]
+        }
     }
 }
 
@@ -2962,6 +2981,42 @@ mod project_extension_tests {
         assert!(matches!(hook.scope, ConfigScope::Project { .. }));
         assert_eq!(hook.agents, vec!["codex"]);
     }
+
+    #[test]
+    fn windsurf_project_skill_prefers_devin_over_legacy_duplicate() {
+        use crate::adapter::windsurf::WindsurfAdapter;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("myrepo");
+        let devin_skill = project.join(".devin/skills/shared");
+        let legacy_skill = project.join(".windsurf/skills/shared");
+        fs::create_dir_all(&devin_skill).unwrap();
+        fs::create_dir_all(&legacy_skill).unwrap();
+        fs::write(
+            devin_skill.join("SKILL.md"),
+            "---\nname: shared\ndescription: devin copy\n---\nbody",
+        )
+        .unwrap();
+        fs::write(
+            legacy_skill.join("SKILL.md"),
+            "---\nname: shared\ndescription: legacy copy\n---\nbody",
+        )
+        .unwrap();
+
+        let adapter = WindsurfAdapter::with_home(tmp.path().to_path_buf());
+        let exts = scan_project_extensions(&adapter, "myrepo", &project);
+        let skills: Vec<_> = exts
+            .iter()
+            .filter(|ext| ext.kind == ExtensionKind::Skill && ext.name == "shared")
+            .collect();
+
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].description, "devin copy");
+        assert!(skills[0]
+            .source_path
+            .as_deref()
+            .is_some_and(|path| path.contains(".devin/skills/shared/SKILL.md")));
+    }
 }
 
 #[cfg(test)]
@@ -3134,8 +3189,12 @@ mod config_tests {
         write(project.join(".github/instructions/general.instructions.md"));
         write(project.join(".github/instructions/frontend/react.instructions.md"));
         let copilot = rules_of(&CopilotAdapter::with_home(home.to_path_buf()));
-        assert!(copilot.iter().any(|p| p.ends_with("style/tone.instructions.md")));
-        assert!(copilot.iter().any(|p| p.ends_with("general.instructions.md")));
+        assert!(copilot
+            .iter()
+            .any(|p| p.ends_with("style/tone.instructions.md")));
+        assert!(copilot
+            .iter()
+            .any(|p| p.ends_with("general.instructions.md")));
         assert!(copilot
             .iter()
             .any(|p| p.ends_with("frontend/react.instructions.md")));
@@ -3408,11 +3467,9 @@ mod config_tests {
         let perms = infer_plugin_permissions(tmp.path());
         // Should fallback to empty Shell + FileSystem
         assert!(perms.iter().any(|p| matches!(p, Permission::Shell { .. })));
-        assert!(
-            perms
-                .iter()
-                .any(|p| matches!(p, Permission::FileSystem { .. }))
-        );
+        assert!(perms
+            .iter()
+            .any(|p| matches!(p, Permission::FileSystem { .. })));
     }
 
     #[test]

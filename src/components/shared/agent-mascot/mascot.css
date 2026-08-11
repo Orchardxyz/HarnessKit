@@ -1105,6 +1105,149 @@
   }
 }
 
+/* === Devin Desktop (Windsurf) === */
+.mascot-devin .devin-mark-wrap {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.mascot-devin .devin-logo,
+.mascot-devin .devin-piece {
+  fill: #080908;
+}
+
+.mascot-devin .devin-piece {
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.mascot-devin.is-animated .devin-mark-wrap {
+  animation: devin-spin 2.4s linear infinite;
+}
+
+.mascot-devin.is-clicked .devin-mark-wrap {
+  animation: none;
+}
+
+.mascot-devin.is-clicked .devin-logo {
+  animation: devin-logo-swap 1.75s ease-in-out;
+}
+
+.mascot-devin.is-clicked .devin-piece-top {
+  animation: devin-drop-top 1.75s cubic-bezier(0.18, 0.78, 0.22, 1);
+}
+
+.mascot-devin.is-clicked .devin-piece-right {
+  animation: devin-drop-right 1.75s cubic-bezier(0.18, 0.78, 0.22, 1);
+}
+
+.mascot-devin.is-clicked .devin-piece-bottom {
+  animation: devin-drop-bottom 1.75s cubic-bezier(0.18, 0.78, 0.22, 1);
+}
+
+@keyframes devin-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes devin-logo-swap {
+  0%,
+  10%,
+  100% {
+    opacity: 1;
+  }
+  14%,
+  86% {
+    opacity: 0;
+  }
+}
+
+@keyframes devin-drop-top {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0);
+  }
+  10% {
+    opacity: 1;
+    transform: translate(0, 0);
+  }
+  48%,
+  62% {
+    opacity: 1;
+    transform: translate(-132px, 196px);
+  }
+  70% {
+    opacity: 1;
+    transform: translate(-132px, 181px);
+  }
+  90% {
+    opacity: 1;
+    transform: translate(0, 0);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(0, 0);
+  }
+}
+
+@keyframes devin-drop-right {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0);
+  }
+  10% {
+    opacity: 1;
+    transform: translate(0, 0);
+  }
+  48%,
+  62% {
+    opacity: 1;
+    transform: translate(-77px, 109px);
+  }
+  70% {
+    opacity: 1;
+    transform: translate(-77px, 94px);
+  }
+  90% {
+    opacity: 1;
+    transform: translate(0, 0);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(0, 0);
+  }
+}
+
+@keyframes devin-drop-bottom {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0);
+  }
+  10% {
+    opacity: 1;
+    transform: translate(0, 0);
+  }
+  48%,
+  62% {
+    opacity: 1;
+    transform: translate(282px, 21px);
+  }
+  70% {
+    opacity: 1;
+    transform: translate(282px, 7px);
+  }
+  90% {
+    opacity: 1;
+    transform: translate(0, 0);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(0, 0);
+  }
+}
+
 /* === OpenCode === */
 .mascot-opencode .opencode-snake {
   /* perimeter = 16+20+16+20 = 72; snake body = 14, gap = 58 */
@@ -1608,6 +1751,7 @@
   .mascot-antigravity.is-animated *,
   .mascot-copilot.is-animated *,
   .mascot-windsurf.is-animated *,
+  .mascot-devin.is-animated *,
   .mascot-opencode.is-animated *,
   .mascot-hermes.is-animated *,
   .mascot-kiro.is-animated *,
@@ -1626,6 +1770,8 @@
   .mascot-copilot.is-clicked *,
   .mascot-windsurf.is-clicked,
   .mascot-windsurf.is-clicked *,
+  .mascot-devin.is-clicked,
+  .mascot-devin.is-clicked *,
   .mascot-opencode.is-clicked,
   .mascot-opencode.is-clicked *,
   .mascot-hermes.is-clicked,
