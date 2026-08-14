@@ -325,23 +325,29 @@ export function ExtensionTable({
                     isSelected ? "bg-accent" : "hover:bg-muted/40"
                   }`}
                 >
-                  {row.getVisibleCells().map((cell, i) => (
-                    <td
-                      key={cell.id}
-                      className={`px-4 py-3 text-sm${i === 0 ? " relative" : ""}`}
-                    >
-                      {i === 0 && isSelected && (
-                        <span
-                          aria-hidden="true"
-                          className="animate-grow-y absolute left-1 top-1/2 h-6 w-[3px] -translate-y-1/2 rounded-full bg-primary"
-                        />
-                      )}
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext(),
-                      )}
-                    </td>
-                  ))}
+                  {row.getVisibleCells().map((cell) => {
+                    // The pill anchors to the "select" column by id, not by
+                    // position, so reordering or inserting columns can't
+                    // detach it from the row's left edge.
+                    const anchorsPill = cell.column.id === "select";
+                    return (
+                      <td
+                        key={cell.id}
+                        className={`px-4 py-3 text-sm${anchorsPill ? " relative" : ""}`}
+                      >
+                        {anchorsPill && isSelected && (
+                          <span
+                            aria-hidden="true"
+                            className="animate-grow-y absolute left-1 top-2.5 bottom-2.5 w-[3px] rounded-full bg-primary"
+                          />
+                        )}
+                        {flexRender(
+                          cell.column.columnDef.cell,
+                          cell.getContext(),
+                        )}
+                      </td>
+                    );
+                  })}
                 </tr>
               );
             })}
