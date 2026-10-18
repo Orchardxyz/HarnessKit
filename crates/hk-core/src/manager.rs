@@ -223,6 +223,11 @@ fn toggle_mcp(
                     &ext.name,
                     enabled,
                 )?;
+            } else if a.name() == "pi" {
+                // Native per-entry flag with no overriding name lists, so the
+                // in-place flip is the whole operation (mirrors `pi mcp` /
+                // `/mcp`).
+                deployer::set_mcp_server_enabled_flag(&config_path, &ext.name, enabled)?;
             } else if a.name() == "dsh" {
                 // Official mechanism: id-targeted `disabled` override in the
                 // home-level cordis.patch.yml (HK-managed block). Hot-reloaded
@@ -738,10 +743,10 @@ fn find_disabled_plugin_path(adapter: &dyn adapter::AgentAdapter, ext_id: &str) 
                     if !file_name.ends_with(".disabled") {
                         continue;
                     }
-                    // opencode and omp report single-file plugins with
+                    // opencode, omp, and pi report single-file plugins with
                     // source "local" (see their read_plugins), so the ID must
                     // be rebuilt with that label, not the directory name.
-                    let source = if matches!(adapter.name(), "opencode" | "omp") {
+                    let source = if matches!(adapter.name(), "opencode" | "omp" | "pi") {
                         "local".to_string()
                     } else {
                         plugin_dir
@@ -762,7 +767,7 @@ fn find_disabled_plugin_path(adapter: &dyn adapter::AgentAdapter, ext_id: &str) 
                 // Directory-form single-entry plugins (omp: <name>/index.{ts,js})
                 // — the disabled marker is the renamed index file inside the
                 // directory, and the plugin is named after the directory.
-                if adapter.name() == "omp" {
+                if matches!(adapter.name(), "omp" | "pi") {
                     for index_name in ["index.ts.disabled", "index.js.disabled"] {
                         let disabled = entry.path().join(index_name);
                         if !disabled.exists() {

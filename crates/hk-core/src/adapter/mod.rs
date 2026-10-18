@@ -13,6 +13,7 @@ pub mod omp;
 pub mod openclaw;
 pub mod opencode;
 pub mod penguin;
+pub mod pi;
 pub mod qoder_cn;
 pub mod windsurf;
 
@@ -237,6 +238,72 @@ pub(crate) fn json_string_vec(val: &serde_json::Value, key: &str) -> Vec<String>
         .unwrap_or_default()
 }
 
+/// Local TypeScript/JavaScript extension modules in `dir`, as omp and Pi
+/// load them: a direct `*.ts`/`*.js` file, or a `<name>/index.{ts,js}`
+/// directory with TypeScript preferred. The loaders glob only those two
+/// extensions, so `.mjs`/`.cjs` and any other file are never listed.
+/// package.json-manifest extensions are not modeled.
+///
+/// A `.disabled` suffix is HarnessKit's in-place disable rename; the loader
+/// glob no longer matches it. The name is taken with the suffix stripped so
+/// it stays stable across the toggle. For a directory extension the entry's
+/// path is the index file, which the toggle renames, keeping the directory
+/// (and so the name) stable; active index files are probed first so an
+/// `index.ts.disabled` next to a live `index.js` reports what the agent
+/// actually loads.
+pub(crate) fn read_ts_extensions(dir: &Path) -> Vec<PluginEntry> {
+    fn entry(name: String, path: PathBuf, enabled: bool) -> PluginEntry {
+        PluginEntry {
+            name,
+            source: "local".into(),
+            enabled,
+            path: Some(path),
+            source_url: None,
+            uri: None,
+            installed_at: None,
+            updated_at: None,
+            base_layers: vec![],
+            pack: None,
+        }
+    }
+    let Ok(files) = std::fs::read_dir(dir) else {
+        return vec![];
+    };
+    let mut entries = Vec::new();
+    for path in files.flatten().map(|f| f.path()) {
+        let Some(file_name) = path.file_name().map(|n| n.to_string_lossy().to_string()) else {
+            continue;
+        };
+        if path.is_file() {
+            let enabled = !file_name.ends_with(".disabled");
+            let base = file_name.strip_suffix(".disabled").unwrap_or(&file_name);
+            let base = Path::new(base);
+            if !matches!(base.extension().and_then(|e| e.to_str()), Some("ts" | "js")) {
+                continue;
+            }
+            let Some(name) = base.file_stem().map(|s| s.to_string_lossy().to_string()) else {
+                continue;
+            };
+            entries.push(entry(name, path, enabled));
+        } else if path.is_dir() {
+            let candidates = [
+                ("index.ts", true),
+                ("index.js", true),
+                ("index.ts.disabled", false),
+                ("index.js.disabled", false),
+            ];
+            if let Some((index, enabled)) = candidates
+                .iter()
+                .map(|(f, e)| (path.join(f), *e))
+                .find(|(p, _)| p.is_file())
+            {
+                entries.push(entry(file_name, index, enabled));
+            }
+        }
+    }
+    entries
+}
+
 /// Represents a hook entry parsed from an agent's config
 #[derive(Debug, Clone)]
 pub struct HookEntry {
@@ -445,17 +512,21 @@ pub enum McpFormat {
 /// How an agent's config spells a remote (HTTP/SSE) MCP entry.
 ///
 /// This is the single source of truth for "which transports can this agent
-/// receive": the deployer's JSON writer dispatches on the four JSON-family
+/// receive": the deployer's JSON writer dispatches on the JSON-family
 /// variants, and `AgentCapabilities::from_adapter` derives UI install-gating
-/// from it (`Toml` and `DshTransport` are the HTTP-only variants — Codex
-/// and dsh have no SSE support; `GrokToml` accepts both;
-/// `Unsupported` receives no remote entries at all).
+/// from it (`Toml`, `DshTransport` and `PlainUrlHttpOnly` are the HTTP-only
+/// variants — Codex, dsh and Pi have no SSE support; `GrokToml` accepts
+/// both; `Unsupported` receives no remote entries at all).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RemoteMcpSchema {
     /// `{type: "http"|"sse", url, headers}` — Claude, Copilot, omp.
     TypeAndUrl,
     /// `{url, headers}`, protocol auto-detected by the agent — Cursor, Kiro.
     PlainUrl,
+    /// `{url, headers}`, Streamable HTTP only — Pi. The file shape matches
+    /// Cursor/Kiro's PlainUrl, but Pi rejects the legacy SSE transport
+    /// (docs/mcp.md), so remote entries are HTTP-only.
+    PlainUrlHttpOnly,
     /// `{httpUrl}` for Streamable HTTP, `{url}` for SSE, `headers` for both — Gemini.
     GeminiSplit,
     /// `{serverUrl, headers}`, protocol auto-detected — Windsurf, Antigravity.
@@ -828,9 +899,9 @@ impl crate::models::AgentCapabilities {
                 .is_some(),
             global_hook_install: a.supports_global_hook_install(),
             vendor_baseline_packs: a.vendor_baseline_packs(),
-            // Codex (`Toml`) and dsh (`DshTransport`) speak Streamable HTTP
-            // but not SSE; GrokToml and every other non-Unsupported schema
-            // take both.
+            // Codex (`Toml`), dsh (`DshTransport`) and Pi (`PlainUrlHttpOnly`)
+            // speak Streamable HTTP but not SSE; GrokToml and every other
+            // non-Unsupported schema take both.
             mcp_remote: crate::models::RemoteTransportFlags {
                 http: remote_schema != RemoteMcpSchema::Unsupported,
                 sse: !matches!(
@@ -838,6 +909,7 @@ impl crate::models::AgentCapabilities {
                     RemoteMcpSchema::Unsupported
                         | RemoteMcpSchema::Toml
                         | RemoteMcpSchema::DshTransport
+                        | RemoteMcpSchema::PlainUrlHttpOnly
                 ),
             },
         }
@@ -875,6 +947,7 @@ pub fn all_adapters() -> Vec<Box<dyn AgentAdapter>> {
         Box::new(qoder_cn::QoderCnAdapter::new()),
         Box::new(openclaw::OpenClawAdapter::new()),
         Box::new(penguin::PenguinAdapter::new()),
+        Box::new(pi::PiAdapter::new()),
     ]
 }
 
@@ -921,7 +994,7 @@ mod tests {
         for a in all_adapters() {
             let caps = crate::models::AgentCapabilities::from_adapter(a.as_ref());
             match a.name() {
-                "codex" | "dsh" => {
+                "codex" | "dsh" | "pi" => {
                     assert!(caps.mcp_remote.http);
                     assert!(!caps.mcp_remote.sse);
                 }
@@ -958,9 +1031,9 @@ mod tests {
     }
 
     #[test]
-    fn test_all_adapters_returns_sixteen() {
+    fn test_all_adapters_returns_seventeen() {
         let adapters = all_adapters();
-        assert_eq!(adapters.len(), 16);
+        assert_eq!(adapters.len(), 17);
         let names: Vec<&str> = adapters.iter().map(|a| a.name()).collect();
         assert_eq!(
             names,
@@ -981,6 +1054,7 @@ mod tests {
                 "qoder-cn",
                 "openclaw",
                 "penguin",
+                "pi",
             ]
         );
     }
@@ -1004,8 +1078,7 @@ mod tests {
         // hurting cross-machine portability.
         for name in [
             "claude", "codex", "gemini", "cursor", "copilot", "opencode", "hermes", "kiro", "omp",
-            "dsh", "grok",
-            "penguin",
+            "dsh", "grok", "penguin", "pi",
         ] {
             assert!(
                 !by_name[name].needs_path_injection(),
@@ -1022,7 +1095,7 @@ mod tests {
         for a in &adapters {
             let expected = matches!(
                 a.name(),
-                "hermes" | "kiro" | "omp" | "dsh" | "grok" | "openclaw"
+                "hermes" | "kiro" | "omp" | "dsh" | "grok" | "openclaw" | "pi"
             );
             assert_eq!(
                 a.supports_native_mcp_toggle(),
@@ -1061,6 +1134,7 @@ mod tests {
             ("qoder-cn", true, false, true, true, true), // project MCP merge pending
             ("openclaw", false, false, false, false, true), // global-only: gateway state dir; hooks are JS handlers
             ("penguin", false, false, false, false, true), // read-only discovery; no hook format, like dsh
+            ("pi", true, true, false, false, true), // TS/JS extensions; MCP has native per-entry enabled; no shell hooks
         ];
 
         let adapters = all_adapters();
@@ -1204,6 +1278,7 @@ mod tests {
             ("dsh", ".dsh/skills"),
             ("grok", ".grok/skills"),
             ("qoder-cn", ".agents/skills"), // Universal standard alias, confirmed in app.asar
+            ("pi", ".pi/skills"),
             // hermes is global-only — no project skill dir (hermes-agent#4667).
         ]
         .into_iter()

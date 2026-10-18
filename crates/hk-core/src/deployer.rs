@@ -224,7 +224,9 @@ fn validate_remote_mcp_target(
         RemoteMcpSchema::Unsupported => Err(HkError::Validation(format!(
             "{agent_name} does not support remote (HTTP/SSE) MCP servers"
         ))),
-        RemoteMcpSchema::Toml | RemoteMcpSchema::DshTransport
+        RemoteMcpSchema::Toml
+        | RemoteMcpSchema::DshTransport
+        | RemoteMcpSchema::PlainUrlHttpOnly
             if entry.transport == McpTransport::Sse =>
         {
             Err(HkError::Validation(format!(
@@ -259,7 +261,7 @@ fn build_mcp_json_value(
             obj.insert("type".into(), type_str.into());
             obj.insert("url".into(), url.into());
         }
-        RemoteMcpSchema::PlainUrl => {
+        RemoteMcpSchema::PlainUrl | RemoteMcpSchema::PlainUrlHttpOnly => {
             obj.insert("url".into(), url.into());
         }
         RemoteMcpSchema::GeminiSplit => {
@@ -304,7 +306,7 @@ fn build_mcp_json_value(
 }
 
 /// JSON-based MCP deploy (Claude, Gemini, Cursor, Antigravity, Copilot,
-/// Windsurf, Kiro, omp). `top_key` is "mcpServers" or "servers" depending
+/// Windsurf, Kiro, omp, Pi). `top_key` is "mcpServers" or "servers" depending
 /// on the agent; `remote` picks the agent's remote-entry spelling.
 fn deploy_mcp_server_json(
     config_path: &Path,
@@ -990,6 +992,34 @@ pub fn set_kiro_mcp_enabled(
     })
 }
 
+/// Flip a `mcpServers.<name>.enabled` flag in place, leaving every other key
+/// of the entry untouched. Absent means enabled (omp mcp-config.md, pi
+/// mcp.md: "skip when false"), so enabling removes the key rather than
+/// writing `true`. For agents whose mcp.json carries this native per-entry
+/// flag (omp, pi).
+pub fn set_mcp_server_enabled_flag(
+    config_path: &Path,
+    server_name: &str,
+    enabled: bool,
+) -> Result<(), HkError> {
+    locked_modify_json(config_path, |config| {
+        let servers = config
+            .get_mut("mcpServers")
+            .and_then(|v| v.as_object_mut())
+            .ok_or_else(|| HkError::NotFound("No mcpServers block found".into()))?;
+        let server = servers
+            .get_mut(server_name)
+            .and_then(|v| v.as_object_mut())
+            .ok_or_else(|| HkError::NotFound(format!("MCP server '{server_name}' not found")))?;
+        if enabled {
+            server.remove("enabled");
+        } else {
+            server.insert("enabled".into(), serde_json::Value::Bool(false));
+        }
+        Ok(())
+    })
+}
+
 /// Flip an omp MCP server's native per-entry `enabled` flag in place, then
 /// scrub the user-level name list that would override the flag: on disable
 /// the name is removed from `enabledServers` (the force-enable allowlist
@@ -1008,23 +1038,7 @@ pub fn set_omp_mcp_enabled(
     server_name: &str,
     enabled: bool,
 ) -> Result<(), HkError> {
-    locked_modify_json(entry_config_path, |config| {
-        let servers = config
-            .get_mut("mcpServers")
-            .and_then(|v| v.as_object_mut())
-            .ok_or_else(|| HkError::NotFound("No mcpServers block found".into()))?;
-        let server = servers
-            .get_mut(server_name)
-            .and_then(|v| v.as_object_mut())
-            .ok_or_else(|| HkError::NotFound(format!("MCP server '{server_name}' not found")))?;
-        if enabled {
-            // Absent means enabled (mcp-config.md: "skip when false").
-            server.remove("enabled");
-        } else {
-            server.insert("enabled".into(), serde_json::Value::Bool(false));
-        }
-        Ok(())
-    })?;
+    set_mcp_server_enabled_flag(entry_config_path, server_name, enabled)?;
     // A missing user file can't contain the name — don't create one just to
     // scrub it.
     if !user_config_path.exists() {
@@ -3207,6 +3221,13 @@ mod tests {
         assert_eq!(v["url"], "https://mcp.linear.app/mcp");
         assert!(v.get("type").is_none());
 
+        // Pi spells remote entries like PlainUrl; the HTTP-only part lives in
+        // the validator.
+        let v = build_mcp_json_value(&http, RemoteMcpSchema::PlainUrlHttpOnly).unwrap();
+        assert_eq!(v["url"], "https://mcp.linear.app/mcp");
+        assert_eq!(v["headers"]["Authorization"], "Bearer tok");
+        assert!(v.get("type").is_none());
+
         // Gemini spells the transport through the key itself.
         let v = build_mcp_json_value(&http, RemoteMcpSchema::GeminiSplit).unwrap();
         assert_eq!(v["httpUrl"], "https://mcp.linear.app/mcp");
@@ -3238,6 +3259,12 @@ mod tests {
             validate_remote_mcp_target(&sse, "dsh", RemoteMcpSchema::DshTransport).unwrap_err();
         assert!(matches!(&err, HkError::Validation(m) if m.contains("not SSE")));
         assert!(validate_remote_mcp_target(&http, "dsh", RemoteMcpSchema::DshTransport).is_ok());
+
+        // Pi (PlainUrlHttpOnly) rejects SSE upstream.
+        let err = validate_remote_mcp_target(&sse, "pi", RemoteMcpSchema::PlainUrlHttpOnly)
+            .unwrap_err();
+        assert!(matches!(&err, HkError::Validation(m) if m.contains("not SSE")));
+        assert!(validate_remote_mcp_target(&http, "pi", RemoteMcpSchema::PlainUrlHttpOnly).is_ok());
 
         // Remote without url is corrupt regardless of target.
         let mut broken = remote_entry(McpTransport::Http);
